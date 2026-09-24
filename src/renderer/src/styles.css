@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-bg: #0a0a0a;
+  --color-panel: #141416;
+  --color-panel-2: #1c1c1f;
+  --color-border: #262629;
+  --color-border-light: #333338;
+  --color-txt: #f4f4f5;
+  --color-txt-2: #a1a1aa;
+  --color-txt-3: #636261;
+  --color-brand: #8b5cf6;
+  --color-brand-2: #a78bfa;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-txt);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+@utility btn-primary {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-medium text-white transition-all;
+  background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 60%, #a78bfa 100%);
+  &:hover {
+    filter: brightness(1.12);
+  }
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+@utility btn-secondary {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full border border-border-light px-4 py-1.5 text-[13px] font-medium text-txt transition-all;
+  &:hover {
+    background: var(--color-panel-2);
+  }
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+@utility icon-btn {
+  @apply inline-flex h-7 w-7 items-center justify-center rounded-md text-txt-2 transition-colors;
+  &:hover {
+    background: var(--color-panel-2);
+    color: var(--color-txt);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2e2e33;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a40;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
