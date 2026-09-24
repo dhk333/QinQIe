@@ -77,7 +77,28 @@ body::before {
 }
 .app { display: flex; flex-direction: column; height: 100vh; }
 
-/* ========== 入场动画已移除：both 填充模式在后台页面不播放，会导致元素停留在 opacity:0 首帧 ========== */
+/* ========== 动效系统 ==========
+   原则：JS 触发类名 + transition，不用 animation-fill-mode + delay（后台页面不播放会停留首帧） */
+:root { --ease: cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes page-enter-kf { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes pop-in-kf { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+.page.page-enter { animation: page-enter-kf 0.25s var(--ease); }
+.pop-in { animation: pop-in-kf 0.22s var(--ease); }
+body, .titlebar, .modal { transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
+.panel-left, .panel-right { transition: width 0.18s var(--ease), background-color 0.2s ease, border-color 0.2s ease; }
+.stagger > * { opacity: 0; transform: translateY(8px); }
+.stagger.animate > * {
+  opacity: 1; transform: none;
+  transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+}
+.grp.dropped-ok { background: var(--accent-dim); color: var(--accent-2); }
+.proj-card:active { transform: translateY(-1px) scale(0.98); }
+.art-card:active .art-thumb { transform: translateY(-2px) scale(0.99); }
 
 /* ========== 顶栏 ========== */
 .titlebar {
@@ -348,13 +369,20 @@ body::before {
 .zoombar .sep { width: 1px; height: 16px; background: var(--line-2); margin: 0 5px; }
 .pct-wrap { position: relative; }
 .pct-menu {
-  position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
-  display: none; flex-direction: column; min-width: 76px; padding: 4px;
+  position: absolute; bottom: calc(100% + 10px); left: 50%;
+  display: flex; flex-direction: column; min-width: 76px; padding: 4px;
   background: var(--overlay); backdrop-filter: blur(10px);
   border: 1px solid var(--line-2); border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05); z-index: 7;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transform: translateX(-50%) translateY(6px) scale(0.95);
+  transform-origin: bottom center;
+  transition: opacity 0.16s var(--ease), transform 0.16s var(--ease), visibility 0.16s;
 }
-.pct-menu.open { display: flex; }
+.pct-menu.open {
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
 .pct-menu span {
   padding: 6px 12px; border-radius: 6px; text-align: center;
   font-family: var(--mono); font-size: 11px; color: var(--txt-2);
@@ -607,12 +635,16 @@ body.light .theme-toggle .icon-moon { display: none; }
 .modal-mask {
   position: fixed; inset: 0; z-index: 60;
   background: rgba(10, 10, 12, 0.55); backdrop-filter: blur(3px);
-  display: grid; place-items: center; animation: fade 0.18s;
+  display: grid; place-items: center; animation: fade 0.15s var(--ease);
+  transition: opacity 0.12s ease;
 }
+.modal-mask.closing { opacity: 0; pointer-events: none; }
+.modal-mask.closing .modal { transform: scale(0.96); opacity: 0; }
 .modal {
   width: 380px; background: var(--panel); border: 1px solid var(--line-2);
   border-radius: 16px; padding: 22px; box-shadow: 0 30px 70px rgba(0, 0, 0, 0.4);
-  animation: rise 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: rise 0.2s var(--ease);
+  transition: transform 0.12s ease, opacity 0.12s ease;
 }
 .modal h3 { font-size: 15px; margin-bottom: 4px; }
 .modal p { font-size: 12px; color: var(--txt-3); }
@@ -631,12 +663,19 @@ body.light .theme-toggle .icon-moon { display: none; }
 .pname-wrap { position: relative; }
 .proj-menu {
   position: absolute; top: calc(100% + 8px); left: 0;
-  display: none; flex-direction: column; min-width: 151px; padding: 4px;
+  display: flex; flex-direction: column; min-width: 151px; padding: 4px;
   background: var(--overlay); backdrop-filter: blur(10px);
   border: 1px solid var(--line-2); border-radius: 12px;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.12); z-index: 10000;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transform: translateY(6px) scale(0.97);
+  transform-origin: top left;
+  transition: opacity 0.16s var(--ease), transform 0.16s var(--ease), visibility 0.16s;
 }
-.proj-menu.open { display: flex; }
+.proj-menu.open {
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
 .proj-menu .item {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 10px; border-radius: 8px;
@@ -704,10 +743,32 @@ body.light .theme-toggle .icon-moon { display: none; }
 .art-card.loading .art-thumb { display: grid; place-items: center; background: var(--panel-2); border-style: dashed; }
 .art-card.loading .art-name::after { content: " · 解析中…"; color: var(--txt-3); }
 .art-empty {
-  margin: 60px auto; width: 420px; padding: 46px 20px; text-align: center;
-  border: 1.5px dashed var(--line-2); border-radius: 16px; color: var(--txt-3); font-size: 13px;
+  margin: 48px auto 0; max-width: 420px;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; padding: 24px 20px;
 }
-.art-empty .plus { font-size: 30px; margin-bottom: 10px; }
+.empty-stack { position: relative; width: 112px; height: 86px; margin-bottom: 16px; }
+.empty-stack i {
+  position: absolute; width: 62px; height: 78px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.10);
+}
+.empty-stack i::before {
+  content: ""; position: absolute; left: 8px; right: 8px; top: 9px; height: 26px;
+  border-radius: 3px; background: linear-gradient(135deg, #e3ebf7, #cbd9ee);
+}
+.empty-stack i::after {
+  content: ""; position: absolute; left: 8px; right: 20px; top: 42px; height: 5px;
+  border-radius: 3px; background: #e6ebf3; box-shadow: 0 9px 0 #eef1f7;
+}
+.empty-stack i:first-child { left: 0; top: 8px; transform: rotate(-7deg); }
+.empty-stack i:last-child {
+  right: 0; top: 0; transform: rotate(6deg);
+  border-color: var(--accent); box-shadow: 0 8px 22px rgba(76, 123, 243, 0.18);
+}
+.art-empty h4 { font-size: 13.5px; font-weight: 600; color: var(--txt); margin: 0 0 3px; }
+.art-empty p { font-size: 12px; color: var(--txt-3); margin: 0; line-height: 1.7; }
+.art-empty .btn { margin-top: 14px; }
 </style>
 </head>
 <body class="light">
@@ -1137,7 +1198,7 @@ document.addEventListener('mouseup', () => {
   if (w < 10 || h < 10) return
   const no = String(sliceSeq++).padStart(2, '0')
   const slice = document.createElement('div')
-  slice.className = 'slice selected'
+  slice.className = 'slice selected pop-in'
   slice.dataset.no = no
   Object.assign(slice.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' })
   slice.innerHTML = `<span class="no">${no}</span><span class="del">✕</span>`
@@ -1221,6 +1282,7 @@ function setupPanelResize({ panelId, resizerId, chevId, min, max, side }) {
     if (e.target === chev) return
     if (panel.classList.contains('collapsed')) { toggle(false); return }
     rz = { x: e.clientX, w: panel.getBoundingClientRect().width }
+    panel.style.transition = 'none'
     e.preventDefault()
   })
   document.addEventListener('mousemove', (e) => {
@@ -1228,7 +1290,11 @@ function setupPanelResize({ panelId, resizerId, chevId, min, max, side }) {
     const d = side === 'left' ? e.clientX - rz.x : rz.x - e.clientX
     panel.style.width = Math.min(max, Math.max(min, rz.w + d)) + 'px'
   })
-  document.addEventListener('mouseup', () => { rz = null })
+  document.addEventListener('mouseup', () => {
+    if (!rz) return
+    rz = null
+    panel.style.transition = ''
+  })
   chev.addEventListener('click', () => toggle(!panel.classList.contains('collapsed')))
 }
 
@@ -1277,6 +1343,7 @@ function renderHome(filter = '') {
       </div>
       <div class="proj-name">${folderSvg}${p.name}<span class="cnt">${p.psds.length} 个 PSD</span></div>
     </div>`).join('')
+  staggerIn(document.getElementById('projGrid'))
 }
 
 document.getElementById('projGrid').addEventListener('click', async (e) => {
@@ -1310,6 +1377,22 @@ document.getElementById('projGrid').addEventListener('click', async (e) => {
 })
 
 document.getElementById('homeSearch').addEventListener('input', (e) => renderHome(e.target.value))
+
+// 列表交错入场：同步强制重排触发 transition。
+// 不用 rAF（后台标签页不执行会让元素卡在 opacity:0），后台渲染时元素直接可见、前台渲染时播放交错动画
+function staggerIn(container) {
+  if (!container) return
+  container.classList.remove('stagger', 'animate')
+  const items = [...container.children]
+  // 页面不可见时 transition 不会推进，直接跳过动画保证内容可见
+  if (items.length === 0 || document.visibilityState !== 'visible') return
+  container.classList.add('stagger')
+  void container.offsetWidth
+  items.forEach((el, i) => { el.style.transitionDelay = Math.min(i * 25, 300) + 'ms' })
+  container.classList.add('animate')
+  clearTimeout(container._staggerT)
+  container._staggerT = setTimeout(() => items.forEach((el) => { el.style.transitionDelay = '' }), 900)
+}
 
 // ========== 通用弹窗与轻提示 ==========
 function showToast(msg, type = 'success') {
@@ -1356,8 +1439,9 @@ function openDialog({ type = 'confirm', title = '', desc = '', value = '', place
     const close = (val) => {
       if (done) return
       done = true
-      mask.remove()
       document.removeEventListener('keydown', onKey)
+      mask.classList.add('closing')
+      setTimeout(() => mask.remove(), 130)
       resolve(val)
     }
     const submit = () => {
@@ -1450,9 +1534,14 @@ function renderProject() {
         : psd.groupId === selectedGroup
     )
   if (list.length === 0) {
-    flow.innerHTML = selectedGroup === 'all'
-      ? `<div class="art-empty"><div class="plus">＋</div>项目还没有设计稿<br>点击右上角「上传 PSD」或把文件拖到这里</div>`
-      : `<div class="art-empty"><div class="plus">＋</div>该分组还没有设计稿<br>把画板拖到左侧分组上即可归类</div>`
+    flow.innerHTML = `
+      <div class="art-empty">
+        <div class="empty-stack"><i></i><i></i></div>
+        ${selectedGroup === 'all'
+          ? `<h4>项目还没有设计稿</h4><p>点击右上角「上传 PSD」<br>或把 PSD 文件直接拖到这里</p>`
+          : `<h4>该分组还没有画板</h4><p>把「全部」里的画板拖到左侧分组上即可归类</p>
+             <button class="btn btn-ghost" id="btnViewAll">查看全部画板</button>`}
+      </div>`
     return
   }
   flow.innerHTML = list.map(({ psd, i }) => `
@@ -1462,6 +1551,7 @@ function renderProject() {
         : thumbHTML(psd, 250)}
       <div class="art-name">${psd.name}<span class="size">${psd.w}×${psd.h}</span></div>
     </div>`).join('')
+  staggerIn(flow)
 }
 
 function thumbHTML(psd, h) {
@@ -1488,6 +1578,11 @@ function thumbHTML(psd, h) {
     </div>`}
 
 document.getElementById('artFlow').addEventListener('click', async (e) => {
+  if (e.target.closest('#btnViewAll')) {
+    selectedGroup = 'all'
+    renderProject()
+    return
+  }
   const card = e.target.closest('.art-card')
   if (!card || card.classList.contains('loading')) return
   const idx = +card.dataset.idx
@@ -1599,6 +1694,11 @@ groupPanel.addEventListener('drop', (e) => {
     currentProject.psds[idx].groupId = g === 'ungrouped' ? null : g
     selectedGroup = g
     renderProject()
+    const dropped = groupPanel.querySelector('.grp.on')
+    if (dropped) {
+      dropped.classList.add('dropped-ok')
+      setTimeout(() => dropped.classList.remove('dropped-ok'), 450)
+    }
   }
   groupPanel.querySelectorAll('.grp').forEach((el) => el.classList.remove('dragover'))
 })
@@ -1664,6 +1764,10 @@ function route() {
     renderHome(document.getElementById('homeSearch').value)
   }
   document.querySelectorAll('.page').forEach((s) => s.classList.toggle('active', s.id === target))
+  const pageEl = document.getElementById(target)
+  pageEl.classList.remove('page-enter')
+  void pageEl.offsetWidth
+  pageEl.classList.add('page-enter')
   document.querySelectorAll('#gTopbar [data-ctx]').forEach((el) => {
     el.style.display = el.dataset.ctx === target ? '' : 'none'
   })
