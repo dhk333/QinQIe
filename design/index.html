@@ -77,13 +77,7 @@ body::before {
 }
 .app { display: flex; flex-direction: column; height: 100vh; }
 
-/* ========== 入场动画 ========== */
-@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-.titlebar, .panel { animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.canvas-wrap { animation: fade 0.7s ease both 0.15s; }
-.panel-left { animation-delay: 0.05s; }
-.panel-right { animation-delay: 0.1s; }
+/* ========== 入场动画已移除：both 填充模式在后台页面不播放，会导致元素停留在 opacity:0 首帧 ========== */
 
 /* ========== 顶栏 ========== */
 .titlebar {
@@ -117,8 +111,8 @@ body::before {
 .actions { display: flex; gap: 10px; align-items: center; }
 .btn {
   display: inline-flex; align-items: center; gap: 7px;
-  border-radius: 999px; padding: 8px 18px;
-  font-size: 13px; font-weight: 500; font-family: var(--sans);
+  border-radius: 999px; padding: 6px 15px;
+  font-size: 12px; font-weight: 500; font-family: var(--sans);
   cursor: pointer; transition: all 0.18s ease;
   border: 1px solid transparent;
 }
@@ -135,8 +129,32 @@ body::before {
 /* ========== 主体三栏 ========== */
 .main { display: flex; flex: 1; min-height: 0; }
 .panel { display: flex; flex-direction: column; background: var(--panel); }
-.panel-left { width: 248px; border-right: 1px solid var(--line); }
-.panel-right { width: 296px; border-left: 1px solid var(--line); }
+.panel-left { width: 248px; border-right: 1px solid var(--line); position: relative; }
+.panel-left.collapsed { width: 0 !important; }
+.panel-left.collapsed > :not(.panel-resizer) { display: none !important; }
+.panel-resizer {
+  position: absolute; top: 0; bottom: 0; right: -3px; width: 6px;
+  cursor: col-resize; z-index: 20;
+}
+.panel-resizer::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px;
+  background: transparent; transition: background 0.15s;
+}
+.panel-resizer:hover::before { background: var(--accent); }
+.rz-chev {
+  position: absolute; top: 50%; right: -8px; transform: translateY(-50%);
+  width: 16px; height: 30px; display: grid; place-items: center;
+  background: var(--panel); border: 1px solid var(--line-2);
+  border-radius: 0 6px 6px 0; color: var(--txt-3); font-size: 9px;
+  cursor: pointer; z-index: 21; transition: all 0.15s;
+}
+.rz-chev:hover { color: var(--accent-2); border-color: var(--accent); }
+.panel-right { width: 296px; border-left: 1px solid var(--line); position: relative; }
+.panel-right.collapsed { width: 0 !important; }
+.panel-right.collapsed > :not(.panel-resizer) { display: none !important; }
+.panel-right .panel-resizer { right: auto; left: -3px; }
+.panel-right .panel-resizer::before { left: auto; right: 2px; }
+.panel-right .rz-chev { right: auto; left: -8px; border-radius: 6px 0 0 6px; }
 .panel-head {
   height: 42px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: space-between;
@@ -268,7 +286,6 @@ body::before {
 .selection {
   position: absolute; top: 236px; left: 118px; width: 330px; height: 140px;
   outline: 1px solid var(--accent);
-  animation: fade 0.4s ease 0.5s both;
 }
 .handle { position: absolute; width: 7px; height: 7px; background: #fff; border: 1.5px solid var(--accent); border-radius: 2px; }
 .handle.h-tl { top: -4px; left: -4px; } .handle.h-tr { top: -4px; right: -4px; }
@@ -283,14 +300,12 @@ body::before {
 .dim-h {
   position: absolute; top: 50%; right: -34px; transform: translateY(-50%);
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  animation: fade 0.4s ease 0.65s both;
 }
 .dim-h .line { width: 1px; height: 110px; background: linear-gradient(180deg, transparent, var(--accent-2), transparent); }
 .dim-h .val { font-family: var(--mono); font-size: 9px; color: var(--accent-2); background: var(--accent-dim); border-radius: 4px; padding: 1px 5px; }
 .dim-w {
   position: absolute; bottom: -26px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 6px;
-  animation: fade 0.4s ease 0.65s both;
 }
 .dim-w .line { height: 1px; width: 280px; background: linear-gradient(90deg, transparent, var(--accent-2), transparent); }
 .dim-w .val { font-family: var(--mono); font-size: 9px; color: var(--accent-2); background: var(--accent-dim); border-radius: 4px; padding: 1px 5px; }
@@ -304,8 +319,25 @@ body::before {
 @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.7; } }
 
 /* 缩放工具条（其余样式在上方「底部工具条」统一处） */
-.zoombar .pct { font-family: var(--mono); font-size: 11px; color: var(--txt-2); min-width: 46px; text-align: center; }
+.zoombar .pct { font-family: var(--mono); font-size: 11px; color: var(--txt-2); min-width: 46px; text-align: center; cursor: pointer; }
+.zoombar .pct:hover { color: var(--txt); }
 .zoombar .sep { width: 1px; height: 16px; background: var(--line-2); margin: 0 5px; }
+.pct-wrap { position: relative; }
+.pct-menu {
+  position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  display: none; flex-direction: column; min-width: 76px; padding: 4px;
+  background: var(--overlay); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05); z-index: 7;
+}
+.pct-menu.open { display: flex; }
+.pct-menu span {
+  padding: 6px 12px; border-radius: 6px; text-align: center;
+  font-family: var(--mono); font-size: 11px; color: var(--txt-2);
+  cursor: pointer; transition: all 0.12s;
+}
+.pct-menu span:hover { background: var(--panel-3); color: var(--txt); }
+.pct-menu span.on { color: var(--accent-2); background: var(--accent-dim); }
 
 /* 状态栏 */
 .statusbar {
@@ -395,7 +427,6 @@ body::before {
   border: 1px solid var(--line-2); border-radius: 999px;
   padding: 7px 8px 7px 16px; z-index: 6;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-  animation: rise 0.5s cubic-bezier(0.22,1,0.36,1) 0.8s both;
 }
 .batch-bar .label { font-family: var(--mono); font-size: 10px; color: var(--txt-2); }
 .batch-bar .label b { color: var(--accent-2); font-weight: 500; }
@@ -425,7 +456,7 @@ body.light .theme-toggle .icon-moon { display: none; }
 
 /* ========== 底部工具条（工具 + 缩放 统一显示） ========== */
 .zoombar {
-  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: 69px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 2px;
   background: var(--overlay); backdrop-filter: blur(10px);
   border: 1px solid var(--line-2); border-radius: 999px;
@@ -476,6 +507,9 @@ body.light .theme-toggle .icon-moon { display: none; }
 /* ========== 多页路由 ========== */
 .page { display: none; height: 100vh; flex-direction: column; }
 .page.active { display: flex; }
+.page-title { font-size: 16px; font-weight: 600; }
+#gTopbar { justify-content: flex-start; gap: 12px; position: relative; z-index: 9999; }
+#gTopbar .g-spacer { flex: 1; }
 .back-btn {
   width: 30px; height: 30px; display: grid; place-items: center;
   border-radius: 8px; color: var(--txt-2); cursor: pointer; transition: all 0.15s;
@@ -486,13 +520,6 @@ body.light .theme-toggle .icon-moon { display: none; }
 .crumb b { color: var(--txt-2); font-weight: 500; }
 
 /* ========== 首页：我的项目 ========== */
-.home-head {
-  height: 64px; flex-shrink: 0;
-  display: flex; align-items: center; gap: 14px; padding: 0 24px;
-  border-bottom: 1px solid var(--line); background: var(--titlebar-bg);
-}
-.home-head .page-title { font-size: 16px; font-weight: 600; }
-.home-head .spacer { flex: 1; }
 .home-search {
   display: flex; align-items: center; gap: 8px; width: 220px;
   background: var(--panel-2); border: 1px solid var(--line);
@@ -507,7 +534,7 @@ body.light .theme-toggle .icon-moon { display: none; }
   position: relative; background: var(--panel); border: 1px solid var(--line);
   border-radius: 14px; overflow: hidden; cursor: pointer; transition: all 0.18s;
 }
-.proj-card:hover { transform: translateY(-3px); border-color: var(--line-2); box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14); }
+.proj-card:hover { transform: translateY(-3px); border-color: var(--line-2); box-shadow: 0 14px 34px rgba(15, 23, 42, 0.04); }
 .proj-cover {
   aspect-ratio: 4 / 3; background: var(--panel-2);
   display: grid; place-items: center; overflow: hidden; position: relative;
@@ -531,17 +558,18 @@ body.light .theme-toggle .icon-moon { display: none; }
 .proj-name { display: flex; align-items: center; gap: 8px; padding: 11px 13px; font-size: 12.5px; font-weight: 500; }
 .proj-name svg { width: 13px; height: 13px; color: var(--accent-2); flex-shrink: 0; }
 .proj-name .cnt { margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 400; color: var(--txt-3); }
-.proj-card .ops {
+/* 通用悬浮操作按钮（项目卡片 / 画板缩略图共用） */
+.proj-card .ops, .art-thumb .ops {
   position: absolute; top: 8px; right: 8px; display: flex; gap: 4px;
   opacity: 0; transition: opacity 0.15s;
 }
-.proj-card:hover .ops { opacity: 1; }
-.proj-card .ops span {
+.proj-card:hover .ops, .art-card:hover .ops { opacity: 1; }
+.proj-card .ops span, .art-thumb .ops span {
   width: 24px; height: 24px; display: grid; place-items: center;
   background: var(--overlay); backdrop-filter: blur(8px);
   border: 1px solid var(--line-2); border-radius: 7px; color: var(--txt-2); font-size: 11px;
 }
-.proj-card .ops span:hover { color: var(--txt); }
+.proj-card .ops span:hover, .art-thumb .ops span:hover { color: var(--txt); }
 .proj-card.new {
   border-style: dashed; border-color: var(--line-2);
   display: grid; place-items: center; min-height: 208px;
@@ -573,18 +601,28 @@ body.light .theme-toggle .icon-moon { display: none; }
 .modal .row2 { display: flex; gap: 10px; justify-content: flex-end; }
 
 /* ========== 项目列表页：横向画板流 ========== */
-.proj-topbar {
-  height: 56px; flex-shrink: 0;
-  display: flex; align-items: center; gap: 12px; padding: 0 18px;
-  border-bottom: 1px solid var(--line); background: var(--titlebar-bg);
+.pname { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 8px; padding: 4px 8px; transition: background 0.15s; }
+.pname:hover { background: var(--panel-2); }
+.pname svg { width: 12px; height: 12px; color: var(--txt-3); }
+.pname-wrap { position: relative; }
+.proj-menu {
+  position: absolute; top: calc(100% + 8px); left: 0;
+  display: none; flex-direction: column; min-width: 151px; padding: 4px;
+  background: var(--overlay); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2); border-radius: 12px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.12); z-index: 10000;
 }
-.proj-topbar .pname { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-.proj-topbar .pname svg { width: 12px; height: 12px; color: var(--txt-3); }
-.tabs { display: flex; gap: 4px; margin-left: 6px; }
-.tab { padding: 6px 16px; border-radius: 8px; color: var(--txt-2); font-size: 13px; cursor: pointer; transition: all 0.15s; }
-.tab:hover { color: var(--txt); }
-.tab.on { color: var(--accent-2); background: var(--accent-dim); font-weight: 500; }
-.proj-topbar .spacer { flex: 1; }
+.proj-menu.open { display: flex; }
+.proj-menu .item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 8px;
+  font-size: 12.5px; color: var(--txt-2); cursor: pointer; transition: all 0.12s;
+}
+.proj-menu .item:hover { background: var(--panel-3); color: var(--txt); }
+.proj-menu .item svg { width: 13px; height: 13px; color: var(--txt-3); flex-shrink: 0; }
+.proj-menu .item.on { color: var(--accent-2); background: var(--accent-dim); }
+.proj-menu .item.on svg { color: var(--accent-2); }
+.proj-menu .item .n-cnt { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--txt-3); }
 .proj-body { flex: 1; display: flex; min-height: 0; }
 .group-panel {
   width: 216px; flex-shrink: 0; border-right: 1px solid var(--line);
@@ -600,6 +638,18 @@ body.light .theme-toggle .icon-moon { display: none; }
 .grp svg { width: 13px; height: 13px; color: var(--txt-3); flex-shrink: 0; }
 .grp.on svg { color: var(--accent-2); }
 .grp .cnt { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--txt-3); }
+.grp { position: relative; }
+.grp.dragover { outline: 1.5px dashed var(--accent); background: var(--accent-dim); }
+.grp .g-ops {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s;
+}
+.grp:hover .g-ops { opacity: 1; }
+.grp .g-ops span {
+  width: 18px; height: 18px; display: grid; place-items: center;
+  border-radius: 5px; font-size: 9px; color: var(--txt-3); background: var(--panel);
+}
+.grp .g-ops span:hover { background: var(--panel-3); color: var(--txt); }
 .grp-add {
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 9px;
   color: var(--txt-3); font-size: 12px; border-radius: 8px; cursor: pointer; margin-top: 4px;
@@ -618,24 +668,10 @@ body.light .theme-toggle .icon-moon { display: none; }
   position: relative; margin: 0 auto;
   background: #fff; border: 1px solid var(--line);
   border-radius: 5px; overflow: hidden;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
-  transition: transform 0.18s, box-shadow 0.18s;
+  transition: transform 0.18s;
 }
-.art-card:hover .art-thumb { transform: translateY(-4px); box-shadow: 0 16px 36px rgba(15, 23, 42, 0.24); }
+.art-card:hover .art-thumb { transform: translateY(-4px); }
 .art-thumb > i { position: absolute; display: block; }
-.art-ops {
-  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
-  display: flex; gap: 8px; opacity: 0; transition: opacity 0.15s;
-}
-.art-card:hover .art-ops { opacity: 1; }
-.art-ops span {
-  display: inline-flex; align-items: center; gap: 5px;
-  background: var(--overlay); backdrop-filter: blur(8px);
-  border: 1px solid var(--line-2); border-radius: 999px;
-  padding: 5px 12px; font-size: 11px; color: var(--txt-2); white-space: nowrap;
-}
-.art-ops span:hover { color: var(--txt); border-color: var(--accent); }
-.art-ops span.cut { color: #fff; background: var(--accent-grad); border: none; box-shadow: 0 4px 12px var(--accent-glow); }
 .art-name {
   margin-top: 10px; text-align: center; font-size: 11.5px; color: var(--txt-2);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -650,26 +686,58 @@ body.light .theme-toggle .icon-moon { display: none; }
 .art-empty .plus { font-size: 30px; margin-bottom: 10px; }
 </style>
 </head>
-<body>
+<body class="light">
+
+<!-- ========== 全局顶栏 ========== -->
+<header class="titlebar" id="gTopbar">
+  <div class="brand">
+    <span class="back-btn" id="btnBackGlobal" title="返回" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg>
+    </span>
+    <div class="logo">切</div>
+    <span class="name">轻切</span>
+    <span class="ver">v0.2-beta</span>
+  </div>
+  <span class="page-title" data-ctx="page-home">我的项目</span>
+  <span class="pname-wrap" data-ctx="page-project">
+    <span class="pname" id="projTitle"></span>
+    <span class="proj-menu" id="projMenu"></span>
+  </span>
+  <div class="file-chip" data-ctx="page-detail">
+    <span class="dot"></span>
+    <span class="crumb"><b id="crumbProj">沃尔核材</b> /</span>
+    <span class="path">4-2 新闻资讯--公司动态--详情.psd</span>
+    <span style="color:var(--txt-3);font-family:var(--mono);font-size:10px">1920 × 2399</span>
+  </div>
+  <span class="g-spacer"></span>
+  <div class="home-search" data-ctx="page-home">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="homeSearch" placeholder="搜索项目…" />
+  </div>
+  <button class="btn btn-primary" id="btnNewProject" data-ctx="page-home">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    新建项目
+  </button>
+  <button class="btn btn-primary" id="btnUploadPsd" data-ctx="page-project" style="padding:7px 16px">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 19V8m0 0l-4.5 4.5M12 8l4.5 4.5"/><path d="M4 4.5h16"/></svg>
+    上传 PSD
+  </button>
+  <button class="btn btn-ghost" data-ctx="page-detail">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 8V6a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V8"/><path d="M3 8h18l-1.8 10a2 2 0 0 1-2 1.7H6.8a2 2 0 0 1-2-1.7L3 8Z"/></svg>
+    打开 PSD
+  </button>
+  <button class="btn btn-primary" data-ctx="page-detail">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5"/><path d="M4 19.5h16"/></svg>
+    导出
+  </button>
+  <button class="theme-toggle" id="themeToggle" title="切换亮色 / 暗色主题">
+    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11Z"/></svg>
+    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/></svg>
+  </button>
+</header>
 
 <!-- ========== 首页：我的项目 ========== -->
 <div class="page" id="page-home">
-  <header class="home-head">
-    <div class="brand">
-      <div class="logo">切</div>
-      <span class="name">轻切</span>
-    </div>
-    <span class="page-title">我的项目</span>
-    <span class="spacer"></span>
-    <div class="home-search">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-      <input id="homeSearch" placeholder="搜索项目…" />
-    </div>
-    <button class="btn btn-primary" id="btnNewProject">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-      新建项目
-    </button>
-  </header>
   <main class="home-main">
     <div class="proj-grid" id="projGrid"></div>
   </main>
@@ -677,35 +745,8 @@ body.light .theme-toggle .icon-moon { display: none; }
 
 <!-- ========== 项目列表页：横向画板流 ========== -->
 <div class="page" id="page-project">
-  <header class="proj-topbar">
-    <span class="back-btn" id="btnBackHome" title="返回我的项目">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg>
-    </span>
-    <span class="pname" id="projTitle">沃尔核材
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-    </span>
-    <nav class="tabs">
-      <span class="tab on">设计</span>
-      <span class="tab">原型</span>
-    </nav>
-    <span class="spacer"></span>
-    <button class="btn btn-primary" id="btnUploadPsd" style="padding:7px 16px">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 19V8m0 0l-4.5 4.5M12 8l4.5 4.5"/><path d="M4 4.5h16"/></svg>
-      上传 PSD
-    </button>
-  </header>
   <div class="proj-body">
-    <aside class="group-panel" id="groupPanel">
-      <span class="grp on" data-grp="all">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
-        全部 <span class="cnt">7</span>
-      </span>
-      <span class="grp" data-grp="ungrouped">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
-        未分组 <span class="cnt">7</span>
-      </span>
-      <span class="grp-add">＋ 新建分组 <kbd>⇧N</kbd></span>
-    </aside>
+    <aside class="group-panel" id="groupPanel"></aside>
     <main class="art-flow" id="artFlow"></main>
   </div>
 </div>
@@ -713,42 +754,10 @@ body.light .theme-toggle .icon-moon { display: none; }
 <!-- ========== 切图详情页 ========== -->
 <div class="app page" id="page-detail">
 
-  <!-- 顶栏 -->
-  <header class="titlebar">
-    <div class="brand">
-      <span class="back-btn" id="btnBackProject" title="返回项目">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg>
-      </span>
-      <div class="logo">切</div>
-      <span class="name">轻切</span>
-      <span class="ver">v0.2-beta</span>
-    </div>
-    <div class="file-chip">
-      <span class="dot"></span>
-      <span class="crumb"><b id="crumbProj">沃尔核材</b> /</span>
-      <span class="path">4-2 新闻资讯--公司动态--详情.psd</span>
-      <span style="color:var(--txt-3);font-family:var(--mono);font-size:10px">1920 × 2399</span>
-    </div>
-    <div class="actions">
-      <button class="theme-toggle" id="themeToggle" title="切换亮色 / 暗色主题">
-        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11Z"/></svg>
-        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/></svg>
-      </button>
-      <button class="btn btn-ghost">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 8V6a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V8"/><path d="M3 8h18l-1.8 10a2 2 0 0 1-2 1.7H6.8a2 2 0 0 1-2-1.7L3 8Z"/></svg>
-        打开 PSD
-      </button>
-      <button class="btn btn-primary">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5"/><path d="M4 19.5h16"/></svg>
-        导出
-      </button>
-    </div>
-  </header>
-
   <div class="main">
 
     <!-- 左：图层树 -->
-    <aside class="panel panel-left">
+    <aside class="panel panel-left" id="panelLeft">
       <div class="panel-head">
         <span class="label">图 层</span>
         <span class="count">89 layers</span>
@@ -816,6 +825,7 @@ body.light .theme-toggle .icon-moon { display: none; }
         </div>
         <div class="row"><span class="twist"></span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-5 4 4 3-3 4 4"/></svg></span><span class="nm">页尾 拷贝 2</span><span class="meta">1920×526</span><span class="eye"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></svg></span></div>
       </div>
+      <span class="panel-resizer" id="panelResizer"><span class="rz-chev" id="rzChev">‹</span></span>
     </aside>
 
     <!-- 中：画布 -->
@@ -902,7 +912,15 @@ body.light .theme-toggle .icon-moon { display: none; }
         <span class="zb" id="toggleSlices" title="显示 / 隐藏切片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></svg></span>
         <span class="sep"></span>
         <span class="zb" title="缩小"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M8.5 11h5"/></svg></span>
-        <span class="pct">35%</span>
+        <span class="pct-wrap" id="pctWrap">
+          <span class="pct" id="pctLabel">35%</span>
+          <span class="pct-menu" id="pctMenu">
+            <span data-z="25%">25%</span>
+            <span data-z="50%">50%</span>
+            <span data-z="75%">75%</span>
+            <span data-z="100%">100%</span>
+          </span>
+        </span>
         <span class="zb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M11 8.5v5M8.5 11h5"/></svg></span>
         <span class="sep"></span>
         <span class="zb" title="适应窗口"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg></span>
@@ -911,7 +929,7 @@ body.light .theme-toggle .icon-moon { display: none; }
     </div>
 
     <!-- 右：属性面板 -->
-    <aside class="panel panel-right">
+    <aside class="panel panel-right" id="panelRight">
       <div class="panel-head">
         <span class="label">属 性</span>
         <span class="count" style="font-family:var(--mono)">ID 42</span>
@@ -974,6 +992,7 @@ body.light .theme-toggle .icon-moon { display: none; }
           命名：图层名@2x.png · 输出 2746 × 1548
         </div>
       </div>
+      <span class="panel-resizer" id="panelResizerR"><span class="rz-chev" id="rzChevR">›</span></span>
     </aside>
   </div>
 </div>
@@ -1139,11 +1158,63 @@ artboard.querySelectorAll('.slice').forEach((s, i) => {
 })
 syncBatch()
 
+// 缩放比例下拉菜单
+const pctWrap = document.getElementById('pctWrap')
+const pctLabel = document.getElementById('pctLabel')
+const pctMenu = document.getElementById('pctMenu')
+pctLabel.addEventListener('click', (e) => {
+  e.stopPropagation()
+  pctMenu.classList.toggle('open')
+})
+pctMenu.addEventListener('click', (e) => {
+  const item = e.target.closest('span[data-z]')
+  if (!item) return
+  pctLabel.textContent = item.dataset.z
+  pctMenu.querySelectorAll('span').forEach((s) => s.classList.toggle('on', s === item))
+  pctMenu.classList.remove('open')
+})
+document.addEventListener('click', (e) => {
+  if (!pctWrap.contains(e.target)) pctMenu.classList.remove('open')
+})
+
+// ========== 左右面板：收起/展开 + 拖拽调宽 ==========
+function setupPanelResize({ panelId, resizerId, chevId, min, max, side }) {
+  const panel = document.getElementById(panelId)
+  const resizer = document.getElementById(resizerId)
+  const chev = document.getElementById(chevId)
+  let rz = null
+  const chevCollapsed = side === 'left' ? '›' : '‹'
+  const chevExpanded = side === 'left' ? '‹' : '›'
+
+  const toggle = (collapse) => {
+    panel.classList.toggle('collapsed', collapse)
+    if (!collapse) panel.style.width = ''
+    chev.textContent = collapse ? chevCollapsed : chevExpanded
+  }
+
+  resizer.addEventListener('mousedown', (e) => {
+    if (e.target === chev) return
+    if (panel.classList.contains('collapsed')) { toggle(false); return }
+    rz = { x: e.clientX, w: panel.getBoundingClientRect().width }
+    e.preventDefault()
+  })
+  document.addEventListener('mousemove', (e) => {
+    if (!rz) return
+    const d = side === 'left' ? e.clientX - rz.x : rz.x - e.clientX
+    panel.style.width = Math.min(max, Math.max(min, rz.w + d)) + 'px'
+  })
+  document.addEventListener('mouseup', () => { rz = null })
+  chev.addEventListener('click', () => toggle(!panel.classList.contains('collapsed')))
+}
+
+setupPanelResize({ panelId: 'panelLeft', resizerId: 'panelResizer', chevId: 'rzChev', min: 170, max: 460, side: 'left' })
+setupPanelResize({ panelId: 'panelRight', resizerId: 'panelResizerR', chevId: 'rzChevR', min: 220, max: 460, side: 'right' })
+
 // ========== 多页路由与演示数据（原型） ==========
 const DATA = {
   projects: [
     {
-      id: 'woer', name: '沃尔核材', psds: [
+      id: 'woer', name: '沃尔核材', groups: [], psds: [
         { name: '1-1 关于我们--首页', w: 1920, h: 6862 },
         { name: '2-1 解决方案', w: 1920, h: 4351 },
         { name: '3-1 产品列表', w: 1920, h: 2619 },
@@ -1153,9 +1224,9 @@ const DATA = {
         { name: '5-1 产品介绍1', w: 1920, h: 3647 }
       ]
     },
-    { id: 'demo', name: '演示项目', psds: [] },
+    { id: 'demo', name: '演示项目', groups: [], psds: [] },
     {
-      id: 'mv', name: '迈威机器人', psds: [
+      id: 'mv', name: '迈威机器人', groups: [], psds: [
         { name: '官网首页', w: 1920, h: 5200 },
         { name: '联系我们', w: 1920, h: 1800 }
       ]
@@ -1180,17 +1251,12 @@ function renderHome(filter = '') {
         </span>
       </div>
       <div class="proj-name">${folderSvg}${p.name}<span class="cnt">${p.psds.length} 个 PSD</span></div>
-    </div>`).join('') + `
-    <div class="proj-card new" id="cardNewProject">
-      <span class="plus">＋</span>
-      <span>新建项目</span>
-    </div>`
+    </div>`).join('')
 }
 
 document.getElementById('projGrid').addEventListener('click', (e) => {
   const card = e.target.closest('.proj-card')
   if (!card) return
-  if (card.id === 'cardNewProject') { openProjectModal(); return }
   const id = card.dataset.id
   const p = DATA.projects.find((x) => x.id === id)
   if (e.target.closest('.op-del')) {
@@ -1247,6 +1313,62 @@ function openProjectModal() {
 
 // 项目列表页
 let currentProject = null
+let selectedGroup = 'all'   // 'all' | 'ungrouped' | 分组 id
+
+const allIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>'
+const ungroupedIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>'
+
+function renderGroupPanel() {
+  currentProject.groups ||= []
+  const cnt = (g) => currentProject.psds.filter((p) =>
+    g === 'all' ? true : g === 'ungrouped' ? !p.groupId : p.groupId === g
+  ).length
+  const grpHtml = (g, label, icon, withOps) => `
+    <span class="grp ${selectedGroup === g ? 'on' : ''}" data-g="${g}">
+      ${icon}${label}<span class="cnt">${cnt(g)}</span>
+      ${withOps ? `<span class="g-ops"><span class="g-op-rename" title="重命名分组">✎</span><span class="g-op-del" title="删除分组">✕</span></span>` : ''}
+    </span>`
+  document.getElementById('groupPanel').innerHTML =
+    grpHtml('all', '全部', allIcon, false) +
+    currentProject.groups.map((g) => grpHtml(g.id, g.name, folderSvg, true)).join('') +
+    grpHtml('ungrouped', '未分组', ungroupedIcon, false) +
+    `<span class="grp-add" id="grpAdd">＋ 新建分组 <kbd>⇧N</kbd></span>`
+}
+
+function renderProject() {
+  if (!currentProject) return
+  currentProject.groups ||= []
+  document.getElementById('projTitle').innerHTML =
+    `${currentProject.name} <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`
+  document.getElementById('crumbProj') && (document.getElementById('crumbProj').textContent = currentProject.name)
+  document.getElementById('projMenu').innerHTML = DATA.projects.map((p) => `
+    <span class="item ${p.id === currentProject.id ? 'on' : ''}" data-id="${p.id}">
+      ${folderSvg}${p.name}<span class="n-cnt">${p.psds.length} PSD</span>
+    </span>`).join('')
+  renderGroupPanel()
+
+  const flow = document.getElementById('artFlow')
+  const list = currentProject.psds
+    .map((psd, i) => ({ psd, i }))
+    .filter(({ psd }) =>
+      selectedGroup === 'all' ? true
+        : selectedGroup === 'ungrouped' ? !psd.groupId
+        : psd.groupId === selectedGroup
+    )
+  if (list.length === 0) {
+    flow.innerHTML = selectedGroup === 'all'
+      ? `<div class="art-empty"><div class="plus">＋</div>项目还没有设计稿<br>点击右上角「上传 PSD」或把文件拖到这里</div>`
+      : `<div class="art-empty"><div class="plus">＋</div>该分组还没有设计稿<br>把画板拖到左侧分组上即可归类</div>`
+    return
+  }
+  flow.innerHTML = list.map(({ psd, i }) => `
+    <div class="art-card ${psd.loading ? 'loading' : ''}" data-idx="${i}" draggable="true" style="width:${Math.max(110, Math.min(420, Math.round(250 * (psd.w / psd.h))))}px">
+      ${psd.loading
+        ? `<div class="art-thumb" style="width:${Math.max(110, Math.min(420, Math.round(250 * (psd.w / psd.h))))}px;height:250px"><span style="font-family:var(--mono);font-size:10px;color:var(--txt-3)">解析中…</span></div>`
+        : thumbHTML(psd, 250)}
+      <div class="art-name">${psd.name}<span class="size">${psd.w}×${psd.h}</span></div>
+    </div>`).join('')
+}
 
 function thumbHTML(psd, h) {
   const w = Math.max(110, Math.min(420, Math.round(h * (psd.w / psd.h))))
@@ -1268,38 +1390,94 @@ function thumbHTML(psd, h) {
   return `
     <div class="art-thumb" style="width:${w}px;height:${h}px">
       ${parts.join('')}
-      <span class="art-ops">
-        <span>标注</span>
-        <span class="cut">✂ 切图</span>
-      </span>
-    </div>`
-}
-
-function renderProject() {
-  if (!currentProject) return
-  document.getElementById('projTitle').innerHTML =
-    `${currentProject.name} <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`
-  document.getElementById('crumbProj') && (document.getElementById('crumbProj').textContent = currentProject.name)
-  const flow = document.getElementById('artFlow')
-  document.querySelector('.grp[data-grp="all"] .cnt').textContent = currentProject.psds.length
-  document.querySelector('.grp[data-grp="ungrouped"] .cnt').textContent = currentProject.psds.length
-  if (currentProject.psds.length === 0) {
-    flow.innerHTML = `<div class="art-empty"><div class="plus">＋</div>项目还没有设计稿<br>点击右上角「上传 PSD」或把文件拖到这里</div>`
-    return
-  }
-  flow.innerHTML = currentProject.psds.map((psd, i) => `
-    <div class="art-card ${psd.loading ? 'loading' : ''}" data-idx="${i}" style="width:${Math.max(110, Math.min(420, Math.round(250 * (psd.w / psd.h))))}px">
-      ${psd.loading
-        ? `<div class="art-thumb" style="width:${Math.max(110, Math.min(420, Math.round(250 * (psd.w / psd.h))))}px;height:250px"><span style="font-family:var(--mono);font-size:10px;color:var(--txt-3)">解析中…</span></div>`
-        : thumbHTML(psd, 250)}
-      <div class="art-name">${psd.name}<span class="size">${psd.w}×${psd.h}</span></div>
-    </div>`).join('')
-}
+      <span class="ops"><span class="op-rename" title="重命名">✎</span><span class="op-del" title="删除此 PSD">✕</span></span>
+    </div>`}
 
 document.getElementById('artFlow').addEventListener('click', (e) => {
   const card = e.target.closest('.art-card')
   if (!card || card.classList.contains('loading')) return
+  const idx = +card.dataset.idx
+  const psd = currentProject.psds[idx]
+  if (e.target.closest('.op-rename')) {
+    const name = prompt('重命名 PSD', psd.name)
+    if (name && name.trim()) { psd.name = name.trim(); renderProject() }
+    return
+  }
+  if (e.target.closest('.op-del')) {
+    if (confirm(`确定删除「${psd.name}」？\n（只从项目中移除记录，不会删除本地文件）`)) {
+      currentProject.psds.splice(idx, 1)
+      renderProject()
+    }
+    return
+  }
   location.hash = '#/detail'
+})
+
+artFlowDragInit()
+
+function artFlowDragInit() {
+  const flow = document.getElementById('artFlow')
+  flow.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.art-card')
+    if (card) e.dataTransfer.setData('text/plain', card.dataset.idx)
+  })
+}
+
+// 分组面板：点击切换 / 新建 / 重命名 / 删除分组 / 拖拽归类
+const groupPanel = document.getElementById('groupPanel')
+groupPanel.addEventListener('click', (e) => {
+  if (!currentProject) return
+  if (e.target.closest('#grpAdd')) {
+    const name = prompt('新建分组')
+    if (name && name.trim()) {
+      currentProject.groups.push({ id: 'g' + Date.now(), name: name.trim() })
+      selectedGroup = currentProject.groups[currentProject.groups.length - 1].id
+      renderProject()
+    }
+    return
+  }
+  const grp = e.target.closest('.grp')
+  if (!grp) return
+  const g = grp.dataset.g
+  if (e.target.closest('.g-op-rename')) {
+    const target = currentProject.groups.find((x) => x.id === g)
+    const name = prompt('重命名分组', target.name)
+    if (name && name.trim()) { target.name = name.trim(); renderProject() }
+    return
+  }
+  if (e.target.closest('.g-op-del')) {
+    const target = currentProject.groups.find((x) => x.id === g)
+    if (confirm(`删除分组「${target.name}」？\n分组内的画板将移入「未分组」`)) {
+      currentProject.psds.forEach((p) => { if (p.groupId === g) p.groupId = null })
+      currentProject.groups = currentProject.groups.filter((x) => x.id !== g)
+      if (selectedGroup === g) selectedGroup = 'all'
+      renderProject()
+    }
+    return
+  }
+  selectedGroup = g
+  renderProject()
+})
+groupPanel.addEventListener('dragover', (e) => {
+  const grp = e.target.closest('.grp')
+  if (grp && grp.dataset.g !== 'all') e.preventDefault()
+  groupPanel.querySelectorAll('.grp').forEach((el) => el.classList.toggle('dragover', el === grp && el.dataset.g !== 'all'))
+})
+groupPanel.addEventListener('dragleave', (e) => {
+  if (e.target === groupPanel) groupPanel.querySelectorAll('.grp').forEach((el) => el.classList.remove('dragover'))
+})
+groupPanel.addEventListener('drop', (e) => {
+  const grp = e.target.closest('.grp')
+  if (!grp || grp.dataset.g === 'all') return
+  e.preventDefault()
+  const idx = +e.dataTransfer.getData('text/plain')
+  const g = grp.dataset.g
+  if (!isNaN(idx) && currentProject.psds[idx]) {
+    currentProject.psds[idx].groupId = g === 'ungrouped' ? null : g
+    selectedGroup = g
+    renderProject()
+  }
+  groupPanel.querySelectorAll('.grp').forEach((el) => el.classList.remove('dragover'))
 })
 
 document.getElementById('groupPanel').addEventListener('click', (e) => {
@@ -1311,15 +1489,36 @@ document.getElementById('groupPanel').addEventListener('click', (e) => {
 document.getElementById('btnUploadPsd').addEventListener('click', () => {
   if (!currentProject) return
   const n = currentProject.psds.filter((p) => p.name.startsWith('新上传')).length + 1
-  const psd = { name: `新上传-${n} 页面`, w: 1920, h: 2800, loading: true }
+  const psd = {
+    name: `新上传-${n} 页面`, w: 1920, h: 2800, loading: true,
+    groupId: selectedGroup !== 'all' && selectedGroup !== 'ungrouped' ? selectedGroup : null
+  }
   currentProject.psds.push(psd)
   renderProject()
   setTimeout(() => { psd.loading = false; renderProject() }, 900)
 })
 
-document.getElementById('btnBackHome').addEventListener('click', () => { location.hash = '#/home' })
-document.getElementById('btnBackProject').addEventListener('click', () => {
-  location.hash = currentProject ? '#/project/' + currentProject.id : '#/home'
+document.getElementById('btnBackGlobal').addEventListener('click', () => {
+  location.hash = (document.querySelector('.page.active')?.id === 'page-detail' && currentProject)
+    ? '#/project/' + currentProject.id
+    : '#/home'
+})
+
+// 项目切换下拉菜单
+const projTitle = document.getElementById('projTitle')
+const projMenu = document.getElementById('projMenu')
+projTitle.addEventListener('click', (e) => {
+  e.stopPropagation()
+  projMenu.classList.toggle('open')
+})
+projMenu.addEventListener('click', (e) => {
+  const item = e.target.closest('.item')
+  if (!item) return
+  projMenu.classList.remove('open')
+  if (item.dataset.id !== currentProject.id) location.hash = '#/project/' + item.dataset.id
+})
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.pname-wrap')) projMenu.classList.remove('open')
 })
 
 // 路由
@@ -1336,6 +1535,10 @@ function route() {
     renderHome(document.getElementById('homeSearch').value)
   }
   document.querySelectorAll('.page').forEach((s) => s.classList.toggle('active', s.id === target))
+  document.querySelectorAll('#gTopbar [data-ctx]').forEach((el) => {
+    el.style.display = el.dataset.ctx === target ? '' : 'none'
+  })
+  document.getElementById('btnBackGlobal').style.display = target === 'page-home' ? 'none' : ''
 }
 window.addEventListener('hashchange', route)
 route()
