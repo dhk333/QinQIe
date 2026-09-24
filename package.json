@@ -12,7 +12,8 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "dist": "electron-vite build && electron-builder --win"
+    "gen:icon": "node scripts/gen-icon.mjs && node scripts/gen-ico.mjs",
+    "dist": "electron-vite build && node scripts/dist-retry.mjs"
   },
   "build": {
     "appId": "com.daihongkun.qingqie",
@@ -24,7 +25,8 @@
       "out/**"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -37,6 +39,7 @@
     "ag-psd": "^29.0.0"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.1.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

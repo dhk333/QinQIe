@@ -542,7 +542,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
               background: 'rgba(10,10,12,0.55)', backdropFilter: 'blur(4px)'
             }}
           >
-            <svg className="logo-draw" viewBox="0 0 352 381" width="60" height="65" fill="none" style={{ color: '#fff' }}>
+            <svg className="logo-draw" viewBox="0 0 352 381" width="42" height="46" fill="none" style={{ color: '#fff' }}>
               <path
                 pathLength={1}
                 d="M156.6,181v50.3c0,6.4-7,10.3-12.4,7l-33.3-20c-5.3-3.2-8.5-8.9-8.5-15.1V98c0-6.4,7-10.3,12.5-7l41.6,25.4L116,156.8L156.6,181z"

@@ -151,11 +151,10 @@ body {
 .g-topbar .g-spacer { flex: 1; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .logo {
-  width: 28px; height: 28px; border-radius: 8px;
+  width: 21px; height: 21px; border-radius: 6px;
   display: grid; place-items: center;
-  font-weight: 700; font-size: 13px; color: #fff;
-  background: var(--accent-grad);
-  box-shadow: 0 0 18px var(--accent-glow);
+  background: var(--panel);
+  border: 1px solid var(--line);
 }
 .brand .name { font-size: 15px; font-weight: 600; }
 .ver { font-size: 10px; color: var(--txt-3); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 8px; font-family: 'IBM Plex Mono', Consolas, monospace; }

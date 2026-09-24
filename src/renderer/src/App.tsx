@@ -98,7 +98,14 @@ export default function App() {
               <BackIcon />
             </span>
           )}
-          <div className="logo">切</div>
+          <div className="logo">
+            <svg viewBox="100 24 168 214" width="13" height="17" fill="none">
+              <path d="M156.6,181v50.3c0,6.4-7,10.3-12.4,7l-33.3-20c-5.3-3.2-8.5-8.9-8.5-15.1V98c0-6.4,7-10.3,12.5-7l41.6,25.4L116,156.8L156.6,181z" fill="#2945be" />
+              <path d="M178.6,116.2h-22V65.7c0-6.4,7-10.3,12.5-7l41.8,25.6L178.6,116.2z" fill="#4b6be4" />
+              <path d="M188.8,148.5h22v50.6c0,6.4-7,10.3-12.4,7L156.6,181L188.8,148.5z" fill="#4b6be4" />
+              <path d="M265.1,61.9v105c0,6.4-7,10.3-12.4,7l-41.9-25.1v-0.3l40.2-40.2l-40.2-24V33.4c0-6.4,7-10.3,12.5-7l33.4,20.4C261.9,50,265.1,55.7,265.1,61.9z" fill="#b0c3eb" />
+            </svg>
+          </div>
           <span className="name">轻切</span>
           <span className="ver">v0.2</span>
         </div>

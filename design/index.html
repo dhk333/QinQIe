@@ -110,11 +110,10 @@ body, .titlebar, .modal { transition: background-color 0.2s ease, color 0.2s eas
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .logo {
-  width: 28px; height: 28px; border-radius: 8px;
+  width: 21px; height: 21px; border-radius: 6px;
   display: grid; place-items: center;
-  font-weight: 700; font-size: 13px; color: #fff;
-  background: var(--accent-grad);
-  box-shadow: 0 0 18px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.25);
+  background: var(--panel);
+  border: 1px solid var(--line);
 }
 .brand .name { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; }
 .ver {
@@ -779,7 +778,7 @@ body.light .theme-toggle .icon-moon { display: none; }
     <span class="back-btn" id="btnBackGlobal" title="返回" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg>
     </span>
-    <div class="logo">切</div>
+    <div class="logo"><svg viewBox="100 24 168 214" width="13" height="17" fill="none"><path d="M156.6,181v50.3c0,6.4-7,10.3-12.4,7l-33.3-20c-5.3-3.2-8.5-8.9-8.5-15.1V98c0-6.4,7-10.3,12.5-7l41.6,25.4L116,156.8L156.6,181z" fill="#2945be"/><path d="M178.6,116.2h-22V65.7c0-6.4,7-10.3,12.5-7l41.8,25.6L178.6,116.2z" fill="#4b6be4"/><path d="M188.8,148.5h22v50.6c0,6.4-7,10.3-12.4,7L156.6,181L188.8,148.5z" fill="#4b6be4"/><path d="M265.1,61.9v105c0,6.4-7,10.3-12.4,7l-41.9-25.1v-0.3l40.2-40.2l-40.2-24V33.4c0-6.4,7-10.3,12.5-7l33.4,20.4C261.9,50,265.1,55.7,265.1,61.9z" fill="#b0c3eb"/></svg></div>
     <span class="name">轻切</span>
     <span class="ver">v0.2-beta</span>
   </div>
