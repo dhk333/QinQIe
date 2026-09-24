@@ -24,6 +24,7 @@ import {
   ZoomOutIcon
 } from '@/components/icons'
 import type { PsdDoc, PsdLayer } from '@/types'
+import type { RNode } from '@/lib/compositor'
 
 interface Props {
   project: Project
@@ -35,6 +36,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
   const [doc, setDoc] = useState<PsdDoc | null>(null)
   const [tree, setTree] = useState<PsdLayer[]>([])
   const [decoding, setDecoding] = useState(false)
+  const [rnodes, setRnodes] = useState<RNode[]>([])
   const canvasMapRef = useRef<Map<number, HTMLCanvasElement>>(new Map())
   const [hiddenIds, setHiddenIds] = useState<Set<number>>(new Set())
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -124,6 +126,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
           toast('主解析器不支持该文件，已使用备用解析器', 'warning')
         }
         canvasMapRef.current = parsed.canvasMap
+        setRnodes(parsed.rnodes)
         setDoc(parsed.doc)
         setTree(parsed.tree)
         setHiddenIds(new Set())
@@ -142,7 +145,9 @@ export default function DetailPage({ project, psd, onBack }: Props) {
           setTimeout(async () => {
             if (!alive) return
             try {
-              canvasMapRef.current = decodeLayerCanvases(buffer, parsed.tree)
+              const decoded = decodeLayerCanvases(buffer, parsed.tree)
+              canvasMapRef.current = decoded.canvasMap
+              setRnodes(decoded.rnodes)
               setDecoding(false)
             } catch {
               // ag-psd 能读结构但位图/蒙版数据解不动（如 Invalid mask size），
@@ -151,6 +156,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
                 const fb = await parsePsdFallback(buffer, name)
                 if (!alive) return
                 canvasMapRef.current = fb.canvasMap
+                setRnodes(fb.rnodes)
                 setDoc(fb.doc)
                 setTree(fb.tree)
                 setHiddenIds(new Set())
@@ -191,7 +197,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
   const handleExport = useCallback(
     async (format: ExportFormat, scale: number) => {
       if (!selectedLayer || !doc) return
-      const canvas = renderLayerCanvas(selectedLayer, doc, canvasMapRef.current, hiddenIds)
+      const canvas = renderLayerCanvas(selectedLayer, rnodes, hiddenIds)
       if (!canvas) {
         toast('该图层没有可导出的位图内容（文本或空图层）', 'warning')
         return
@@ -202,7 +208,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
       const saved = await window.api.saveImage(`${safeName}@${scale}x.${ext}`, format, dataUrl)
       if (saved) toast(`已导出 ${safeName}@${scale}x.${ext}`)
     },
-    [selectedLayer, doc, hiddenIds, toast]
+    [selectedLayer, doc, rnodes, hiddenIds, toast]
   )
 
   const toggleHidden = useCallback(
@@ -243,7 +249,8 @@ export default function DetailPage({ project, psd, onBack }: Props) {
       let seq = 0
       for (const node of flattenLayers(tree)) {
         if (node.type !== 'layer' || node.hidden || hiddenIds.has(node.id)) continue
-        const canvas = canvasMapRef.current.get(node.id)
+        // 走合成器出图：含蒙版、图层样式与剪贴，与画布所见一致
+        const canvas = renderLayerCanvas(node, rnodes, hiddenIds)
         if (!canvas) continue
         const safe = node.name.replace(/[\\/:*?"<>|]/g, '_')
         const ext = format === 'jpeg' ? 'jpg' : format
@@ -262,7 +269,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
       if (res === null) return
       toast(`已导出 ${res.saved} 个文件到所选目录`)
     },
-    [tree, hiddenIds, template, toast]
+    [tree, rnodes, hiddenIds, template, toast]
   )
 
   const handleTemplate = async () => {
@@ -339,7 +346,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
         toast('还没有切片，用切片工具在画布上拖拽创建', 'warning')
         return
       }
-      const composite = buildCompositeCanvas(doc, tree, canvasMapRef.current, hiddenIds)
+      const composite = buildCompositeCanvas(doc, rnodes, hiddenIds)
       if (!composite) return
       const ext = format === 'jpeg' ? 'jpg' : format
       const files = targets.map((s, i) => {
@@ -364,7 +371,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
       if (res === null) return
       toast(`已导出 ${res.saved} 个切片到所选目录`)
     },
-    [doc, slices, selectedSliceIds, tree, hiddenIds, template, toast]
+    [doc, slices, selectedSliceIds, rnodes, hiddenIds, template, toast]
   )
 
   const handlePickColor = useCallback(
@@ -401,6 +408,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
         <CanvasView
           doc={doc}
           tree={tree}
+          rnodes={rnodes}
           canvasMap={canvasMapRef.current}
           hiddenIds={hiddenIds}
           selectedId={selectedId}
@@ -621,6 +629,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
         <PropertiesPanel
           layer={selectedLayer}
           doc={doc}
+          rnodes={rnodes}
           canvasMap={canvasMapRef.current}
           hiddenIds={hiddenIds}
           onExport={handleExport}

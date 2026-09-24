@@ -12,6 +12,9 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "verify:psd": "node scripts/verify-fidelity.mjs",
+    "verify:app": "node --import ./scripts/ts-resolve.mjs scripts/verify-app-path.mjs",
+    "verify": "npm run verify:psd && npm run verify:app",
     "gen:icon": "node scripts/gen-icon.mjs && node scripts/gen-ico.mjs",
     "dist": "electron-vite build && node scripts/dist-retry.mjs",
     "postinstall": "patch-package"
@@ -42,6 +45,7 @@
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^20.19.43",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

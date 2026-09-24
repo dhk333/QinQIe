@@ -1,13 +1,36 @@
 import { readPsd, type Layer, type Psd } from 'ag-psd'
 import type { PsdDoc, PsdLayer } from '@/types'
+import {
+  buildRNode,
+  compositeDocument,
+  renderIsolated,
+  type Env,
+  type RNode
+} from './compositor'
 
 export interface ParseResult {
   doc: PsdDoc
   tree: PsdLayer[]
+  /** 图层原始位图（未烘焙蒙版/样式），供取色与命中测试使用 */
   canvasMap: Map<number, HTMLCanvasElement>
+  /** 与 tree 同 id 的合成器节点树，预览与导出都以它为准 */
+  rnodes: RNode[]
 }
 
 let nextId = 1
+
+/** 浏览器侧的合成器环境：所有离屏画布都用 DOM canvas 实现 */
+export const browserEnv: Env = {
+  createCanvas(w, h) {
+    const c = document.createElement('canvas')
+    c.width = Math.max(1, w)
+    c.height = Math.max(1, h)
+    // 先按 willReadFrequently 建上下文：合成器会大量 getImageData/putImageData，
+    // 让 Chrome 把这些离屏画布放在 CPU 后端，避免每次读回像素都走 GPU 同步回读
+    c.getContext('2d', { willReadFrequently: true })
+    return c
+  }
+}
 
 // ag-psd 的文本内容在 text.text，字体名在 text.style.font.name，
 // fillColor 一般为 0~255，个别文件为 0~1，统一归一化
@@ -45,51 +68,6 @@ function readTextInfo(text: unknown): PsdLayer['textInfo'] {
   }
 }
 
-// ag-psd 的 mask.canvas 用 RGB 明度编码蒙版（alpha 恒为 255），
-// 这里转成 alpha 并烘焙进图层 canvas，mask 矩形之外的区域用 defaultColor 填充
-function bakeMask(layer: Layer): HTMLCanvasElement | null {
-  const mask = layer.mask
-  if (!mask || mask.disabled || !layer.canvas) return null
-  const l = layer.left ?? 0
-  const t = layer.top ?? 0
-  const mL = mask.left ?? 0
-  const mT = mask.top ?? 0
-  const uL = Math.min(mL, l)
-  const uT = Math.min(mT, t)
-  const uR = Math.max(mask.right ?? mL, (layer.right ?? 0))
-  const uB = Math.max(mask.bottom ?? mT, (layer.bottom ?? 0))
-  const uw = Math.max(1, uR - uL)
-  const uh = Math.max(1, uB - uT)
-
-  const plane = document.createElement('canvas')
-  plane.width = uw
-  plane.height = uh
-  const pctx = plane.getContext('2d')!
-  const def = mask.defaultColor ?? 0
-  pctx.fillStyle = `rgb(${def},${def},${def})`
-  pctx.fillRect(0, 0, uw, uh)
-  if (mask.canvas) pctx.drawImage(mask.canvas, mL - uL, mT - uT)
-
-  const img = pctx.getImageData(0, 0, uw, uh)
-  const d = img.data
-  for (let i = 0; i < d.length; i += 4) {
-    d[i + 3] = d[i]
-    d[i] = 255
-    d[i + 1] = 255
-    d[i + 2] = 255
-  }
-  pctx.putImageData(img, 0, 0)
-
-  const out = document.createElement('canvas')
-  out.width = layer.canvas.width
-  out.height = layer.canvas.height
-  const octx = out.getContext('2d')!
-  octx.drawImage(layer.canvas, 0, 0)
-  octx.globalCompositeOperation = 'destination-in'
-  octx.drawImage(plane, uL - l, uT - t)
-  return out
-}
-
 // ag-psd 的组节点 bounds 常常是 0，需要由子图层并集推算
 function groupBounds(children: PsdLayer[]): { left: number; top: number; width: number; height: number } | null {
   let l = Infinity
@@ -107,15 +85,13 @@ function groupBounds(children: PsdLayer[]): { left: number; top: number; width: 
   return { left: l, top: t, width: r - l, height: b - t }
 }
 
-function toNode(layer: Layer, canvasMap: Map<number, HTMLCanvasElement>): PsdLayer {
+function toNode(layer: Layer, canvasMap: Map<number, HTMLCanvasElement>, ids: WeakMap<Layer, number>): PsdLayer {
   const id = nextId++
-  const canvas = layer.canvas
-  if (canvas) canvasMap.set(id, canvas)
-  const baked = bakeMask(layer)
-  if (baked) canvasMap.set(id, baked)
+  ids.set(layer, id)
+  if (layer.canvas) canvasMap.set(id, layer.canvas)
   const left = layer.left ?? 0
   const top = layer.top ?? 0
-  const children = layer.children?.length ? layer.children.map((c) => toNode(c, canvasMap)) : undefined
+  const children = layer.children?.length ? layer.children.map((c) => toNode(c, canvasMap, ids)) : undefined
   const gb = children ? groupBounds(children) : null
   return {
     id,
@@ -136,6 +112,21 @@ function toNode(layer: Layer, canvasMap: Map<number, HTMLCanvasElement>): PsdLay
   }
 }
 
+/** 用 PsdLayer 树的 id 反推合成器节点树，保证选中/显隐状态两边通用 */
+function toRNodes(layers: Layer[], ids: WeakMap<Layer, number>): RNode[] {
+  return layers.map((l) =>
+    buildRNode(l as unknown as Parameters<typeof buildRNode>[0], (x) => ids.get(x as Layer) ?? 0)
+  )
+}
+
+export function indexRNodes(nodes: RNode[], out = new Map<number, RNode>()): Map<number, RNode> {
+  for (const n of nodes) {
+    out.set(n.id, n)
+    if (n.children) indexRNodes(n.children, out)
+  }
+  return out
+}
+
 export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = false): ParseResult {
   const psd: Psd = readPsd(buffer, {
     skipLinkedFilesData: true,
@@ -146,7 +137,10 @@ export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = f
   // 无图层树的扁平 PSD 只能靠合成图，结构阶段跳过合成会取不到位图，直接全量解析
   if (structureOnly && (psd.children ?? []).length === 0) return parsePsd(buffer, fileName)
   const canvasMap = new Map<number, HTMLCanvasElement>()
-  let tree: PsdLayer[] = (psd.children ?? []).map((l) => toNode(l, canvasMap))
+  const ids = new WeakMap<Layer, number>()
+  const layers = psd.children ?? []
+  let tree: PsdLayer[] = layers.map((l) => toNode(l, canvasMap, ids))
+  let rnodes = toRNodes(layers, ids)
   if (tree.length === 0 && psd.canvas) {
     const id = nextId++
     canvasMap.set(id, psd.canvas)
@@ -166,34 +160,51 @@ export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = f
         blendMode: 'normal'
       }
     ]
+    rnodes = [
+      {
+        id,
+        name: fileName,
+        kind: 'layer',
+        left: 0,
+        top: 0,
+        right: psd.width,
+        bottom: psd.height,
+        opacity: 1,
+        fillOpacity: 1,
+        hidden: false,
+        clipping: false,
+        blendMode: 'normal',
+        canvas: psd.canvas
+      }
+    ]
   }
-  return { doc: { fileName, width: psd.width, height: psd.height }, tree, canvasMap }
+  return { doc: { fileName, width: psd.width, height: psd.height }, tree, canvasMap, rnodes }
 }
 
 // 两阶段加载的第二步：全量解码位图，按 parsePsd(structureOnly) 生成的树位置对齐，
-// 把 canvas 填进以既有节点 id 为键的 canvasMap，保证选中/显隐状态不失效
+// 把 canvas 填进以既有节点 id 为键的 canvasMap，并用同一批 id 重建合成器节点树
 export function decodeLayerCanvases(
   buffer: Uint8Array,
   tree: PsdLayer[]
-): Map<number, HTMLCanvasElement> {
+): { canvasMap: Map<number, HTMLCanvasElement>; rnodes: RNode[] } {
   const psd: Psd = readPsd(buffer, { skipLinkedFilesData: true, skipThumbnail: true })
   const canvasMap = new Map<number, HTMLCanvasElement>()
+  const ids = new WeakMap<Layer, number>()
   const attach = (layers: Layer[], nodes: PsdLayer[]) => {
     for (let i = 0; i < layers.length && i < nodes.length; i++) {
       const layer = layers[i]
       const node = nodes[i]
+      ids.set(layer, node.id)
       if (node.type === 'group') {
         if (layer.children?.length && node.children) attach(layer.children, node.children)
         continue
       }
-      if (layer.canvas) {
-        const baked = bakeMask(layer)
-        canvasMap.set(node.id, baked ?? layer.canvas)
-      }
+      if (layer.canvas) canvasMap.set(node.id, layer.canvas)
     }
   }
-  attach(psd.children ?? [], tree)
-  return canvasMap
+  const layers = psd.children ?? []
+  attach(layers, tree)
+  return { canvasMap, rnodes: toRNodes(layers, ids) }
 }
 
 export function flattenLayers(nodes: PsdLayer[], out: PsdLayer[] = []): PsdLayer[] {
@@ -205,132 +216,34 @@ export function flattenLayers(nodes: PsdLayer[], out: PsdLayer[] = []): PsdLayer
 }
 
 // ========== 画布合成（CanvasView 与切片导出共用） ==========
-// children 为自底向上顺序（背景层在前），按数组原序绘制
-const BLEND_MAP: Record<string, GlobalCompositeOperation> = {
-  multiply: 'multiply',
-  screen: 'screen',
-  overlay: 'overlay',
-  darken: 'darken',
-  lighten: 'lighten',
-  'color dodge': 'color-dodge',
-  'color burn': 'color-burn',
-  'hard light': 'hard-light',
-  'soft light': 'soft-light',
-  difference: 'difference',
-  exclusion: 'exclusion',
-  hue: 'hue',
-  saturation: 'saturation',
-  color: 'color',
-  luminosity: 'luminosity',
-  'linear dodge': 'lighter'
-}
-
-export interface DrawContext {
-  canvasMap: Map<number, HTMLCanvasElement>
-  hiddenIds: Set<number>
-}
-
-function drawSingleLayer(ctx: CanvasRenderingContext2D, node: PsdLayer, dc: DrawContext, blend = true) {
-  if (node.hidden || dc.hiddenIds.has(node.id)) return
-  const canvas = dc.canvasMap.get(node.id)
-  if (!canvas || node.width === 0 || node.height === 0) return
-  ctx.save()
-  ctx.globalAlpha = node.opacity
-  if (blend) ctx.globalCompositeOperation = BLEND_MAP[node.blendMode] ?? 'source-over'
-  ctx.drawImage(canvas, node.left, node.top, node.width, node.height)
-  ctx.restore()
-}
-
-export function drawSiblings(ctx: CanvasRenderingContext2D, nodes: PsdLayer[], dc: DrawContext) {
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i]
-    if (node.children) {
-      drawSiblings(ctx, node.children, dc)
-      continue
-    }
-    if (node.hidden || dc.hiddenIds.has(node.id)) continue
-
-    // 剪贴蒙版：连续 clipping 的图层被裁切到其下方基础图层的不透明区域
-    const clipped: PsdLayer[] = []
-    let j = i + 1
-    while (j < nodes.length && nodes[j].clipping && !nodes[j].children) {
-      clipped.push(nodes[j])
-      j++
-    }
-
-    if (clipped.length === 0) {
-      drawSingleLayer(ctx, node, dc)
-      continue
-    }
-
-    const visibleClipped = clipped.filter(
-      (c) => !c.hidden && !dc.hiddenIds.has(c.id) && dc.canvasMap.has(c.id)
-    )
-    if (visibleClipped.length === 0) {
-      drawSingleLayer(ctx, node, dc)
-      i = j - 1
-      continue
-    }
-
-    const left = Math.min(node.left, ...visibleClipped.map((c) => c.left))
-    const top = Math.min(node.top, ...visibleClipped.map((c) => c.top))
-    const right = Math.max(node.left + node.width, ...visibleClipped.map((c) => c.left + c.width))
-    const bottom = Math.max(node.top + node.height, ...visibleClipped.map((c) => c.top + c.height))
-    const tmp = document.createElement('canvas')
-    tmp.width = Math.max(1, right - left)
-    tmp.height = Math.max(1, bottom - top)
-    const tctx = tmp.getContext('2d')!
-
-    const base = { ...node, left: node.left - left, top: node.top - top }
-    drawSingleLayer(tctx, base, dc, false)
-    for (const c of visibleClipped) {
-      drawSingleLayer(tctx, { ...c, left: c.left - left, top: c.top - top }, dc)
-    }
-    tctx.globalCompositeOperation = 'destination-in'
-    tctx.globalAlpha = 1
-    const baseCanvas = dc.canvasMap.get(node.id)!
-    tctx.drawImage(baseCanvas, node.left - left, node.top - top, node.width, node.height)
-
-    ctx.save()
-    ctx.globalAlpha = node.opacity
-    ctx.drawImage(tmp, left, top)
-    ctx.restore()
-    i = j - 1
-  }
-}
-
+// 统一走 compositor.ts：与 Node 侧像素回归同一份实现，保证「所见 = 所导出 = 基线」
 export function buildCompositeCanvas(
   doc: PsdDoc,
-  tree: PsdLayer[],
-  canvasMap: Map<number, HTMLCanvasElement>,
+  rnodes: RNode[],
   hiddenIds: Set<number>
-): HTMLCanvasElement | null {
-  const c = document.createElement('canvas')
-  c.width = Math.max(1, doc.width)
-  c.height = Math.max(1, doc.height)
-  const ctx = c.getContext('2d')
-  if (!ctx) return null
-  drawSiblings(ctx, tree, { canvasMap, hiddenIds })
-  return c
+): HTMLCanvasElement {
+  return compositeDocument(rnodes, { env: browserEnv, hiddenIds }, {
+    width: doc.width,
+    height: doc.height
+  }) as HTMLCanvasElement
 }
 
 // 图层（或组合成图）→ 以图层自身范围裁剪的画布，供预览与导出共用
 export function renderLayerCanvas(
   layer: PsdLayer,
-  doc: PsdDoc,
-  canvasMap: Map<number, HTMLCanvasElement>,
+  rnodes: RNode[],
   hiddenIds: Set<number>
 ): HTMLCanvasElement | null {
-  if (!layer.children?.length) return canvasMap.get(layer.id) ?? null
-  if (!(layer.width > 0) || !(layer.height > 0)) return null
-  const comp = buildCompositeCanvas(doc, layer.children, canvasMap, hiddenIds)
-  if (!comp) return null
+  const node = indexRNodes(rnodes).get(layer.id)
+  if (!node) return null
+  const r = renderIsolated(node, { env: browserEnv, hiddenIds })
+  if (!r) return null
   const out = document.createElement('canvas')
-  out.width = Math.round(layer.width)
-  out.height = Math.round(layer.height)
+  out.width = Math.max(1, Math.round(layer.width))
+  out.height = Math.max(1, Math.round(layer.height))
   const ctx = out.getContext('2d')
   if (!ctx) return null
-  ctx.drawImage(comp, layer.left, layer.top, out.width, out.height, 0, 0, out.width, out.height)
+  ctx.drawImage(r.canvas as unknown as HTMLCanvasElement, Math.round(r.rect.x - layer.left), Math.round(r.rect.y - layer.top))
   return out
 }
 
@@ -357,8 +270,9 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
 
   // webtoon 的 children 是自上而下（顶层在前），与 ag-psd 相反；
   // 逆序遍历，统一成自底向上，保证绘制顺序与剪贴链语义一致
-  const walk = async (nodes: any[]): Promise<PsdLayer[]> => {
+  const walk = async (nodes: any[]): Promise<{ layers: PsdLayer[]; rnodes: RNode[] }> => {
     const out: PsdLayer[] = []
+    const rnodes: RNode[] = []
     for (let k = nodes.length - 1; k >= 0; k--) {
       const node = nodes[k]
       const id = nextId++
@@ -380,18 +294,33 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
           // 单层渲染失败时跳过该层位图
         }
       }
-      const children = node.children ? await walk(node.children) : undefined
+      const sub = node.children ? await walk(node.children) : null
+      const children = sub?.layers
+      const name = node.name || (node.type === 'Group' ? '未命名组' : '未命名图层')
+      const blendMode = WEBTOON_BLEND_TO_AG[(node.blendMode as string) ?? 'norm'] ?? 'normal'
+      const hidden = !!node.isHidden
+      const clipping = node.clipping === 1
+      const opacity = typeof node.opacity === 'number' ? node.opacity / 255 : 1
       const gb = children?.length ? groupBounds(children) : null
+      const bx = gb?.left ?? left
+      const by = gb?.top ?? top
+      const bw = gb?.width ?? width
+      const bh = gb?.height ?? height
+      rnodes.push(
+        children
+          ? { id, name, kind: 'group', left: bx, top: by, right: bx + bw, bottom: by + bh, opacity, fillOpacity: 1, hidden, clipping, blendMode, children: sub!.rnodes }
+          : { id, name, kind: 'layer', left, top, right: left + width, bottom: top + height, opacity, fillOpacity: 1, hidden, clipping, blendMode, canvas: canvas ?? null }
+      )
       out.push({
         id,
-        name: node.name || (node.type === 'Group' ? '未命名组' : '未命名图层'),
+        name,
         type: node.type === 'Group' ? 'group' : 'layer',
-        left: gb?.left ?? left,
-        top: gb?.top ?? top,
-        width: gb?.width ?? width,
-        height: gb?.height ?? height,
-        opacity: typeof node.opacity === 'number' ? node.opacity / 255 : 1,
-        hidden: !!node.isHidden,
+        left: bx,
+        top: by,
+        width: bw,
+        height: bh,
+        opacity,
+        hidden,
         isText: !!node.text,
         textInfo: node.text
           ? {
@@ -404,20 +333,21 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
                 : undefined
             }
           : undefined,
-        clipping: node.clipping === 1,
-        blendMode: WEBTOON_BLEND_TO_AG[(node.blendMode as string) ?? 'norm'] ?? 'normal',
+        clipping,
+        blendMode,
         // 必须复用上面已 walk 的结果：再 walk 一次会生成新 id，与 canvasMap 错位
         children
       })
     }
-    return out
+    return { layers: out, rnodes }
   }
 
-  const tree = await walk(psd.children ?? [])
+  const { layers: tree, rnodes } = await walk(psd.children ?? [])
   if (tree.length === 0) throw new Error('备用解析器：未找到图层')
   return {
     doc: { fileName, width: psd.width, height: psd.height },
     tree,
-    canvasMap
+    canvasMap,
+    rnodes
   }
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
-import { drawSiblings, flattenLayers } from '@/lib/psd'
+import type { RNode } from '@/lib/compositor'
+import { buildCompositeCanvas, flattenLayers } from '@/lib/psd'
 
 export type CanvasTool = 'move' | 'slice' | 'picker' | 'hand'
 
@@ -13,6 +14,7 @@ export interface CanvasViewApi {
 interface Props {
   doc: PsdDoc | null
   tree: PsdLayer[]
+  rnodes: RNode[]
   canvasMap: Map<number, HTMLCanvasElement>
   hiddenIds: Set<number>
   selectedId: number | null
@@ -125,6 +127,7 @@ function resizeRect(
 export default function CanvasView({
   doc,
   tree,
+  rnodes,
   canvasMap,
   hiddenIds,
   selectedId,
@@ -149,6 +152,8 @@ export default function CanvasView({
   const [drawingRect, setDrawingRect] = useState<DrawRect | null>(null)
   const lastFitDoc = useRef<string>('')
   const drag = useRef<DragState | null>(null)
+  /** 整篇合成结果：只在图层内容/显隐变化时重建，平移缩放只搬运这张图 */
+  const composite = useRef<{ rnodes: RNode[]; hiddenIds: Set<number>; canvas: HTMLCanvasElement } | null>(null)
 
   useEffect(() => {
     const el = containerRef.current
@@ -212,7 +217,14 @@ export default function CanvasView({
     ctx.scale(zoom, zoom)
     ctx.fillStyle = makeCheckerPattern(ctx)
     ctx.fillRect(0, 0, doc.width, doc.height)
-    drawSiblings(ctx, tree, { canvasMap, hiddenIds })
+    if (!composite.current || composite.current.rnodes !== rnodes || composite.current.hiddenIds !== hiddenIds) {
+      composite.current = {
+        rnodes,
+        hiddenIds,
+        canvas: buildCompositeCanvas(doc, rnodes, hiddenIds)
+      }
+    }
+    ctx.drawImage(composite.current.canvas, 0, 0)
     ctx.restore()
 
     const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#4c7bf3'
@@ -310,7 +322,7 @@ export default function CanvasView({
         ctx.setLineDash([])
       }
     }
-  }, [doc, tree, canvasMap, hiddenIds, selectedId, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect])
+  }, [doc, tree, rnodes, canvasMap, hiddenIds, selectedId, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect])
 
   // 滚轮缩放
   useEffect(() => {

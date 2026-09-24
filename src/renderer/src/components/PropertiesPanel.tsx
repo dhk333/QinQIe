@@ -2,11 +2,13 @@ import { useMemo, useState } from 'react'
 import type { ExportFormat, PsdDoc, PsdLayer } from '@/types'
 import { layerCssSnippet, sampleColor } from '@/lib/export'
 import { renderLayerCanvas } from '@/lib/psd'
+import type { RNode } from '@/lib/compositor'
 import { CheckIcon, CopyIcon } from './icons'
 
 interface Props {
   layer: PsdLayer | null
   doc: PsdDoc | null
+  rnodes: RNode[]
   canvasMap: Map<number, HTMLCanvasElement>
   hiddenIds: Set<number>
   onExport: (format: ExportFormat, scale: number) => void
@@ -32,26 +34,29 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export default function PropertiesPanel({ layer, doc, canvasMap, hiddenIds, onExport }: Props) {
+export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenIds, onExport }: Props) {
   const [format, setFormat] = useState<ExportFormat>('png')
   const [scale, setScale] = useState(2)
   const [copied, setCopied] = useState<'css' | 'color' | 'text' | null>(null)
 
   const color = useMemo(
-    () => (layer ? sampleColor(canvasMap.get(layer.id)!) : null),
+    () => {
+      const c = layer ? canvasMap.get(layer.id) : undefined
+      return c ? sampleColor(c) : null
+    },
     [layer, canvasMap]
   )
   const css = useMemo(() => (layer ? layerCssSnippet(layer, color) : ''), [layer, color])
   const previewUrl = useMemo(() => {
     if (!layer || !doc) return null
     try {
-      const c = renderLayerCanvas(layer, doc, canvasMap, hiddenIds)
+      const c = renderLayerCanvas(layer, rnodes, hiddenIds)
       if (!c || !c.width || !c.height) return null
       return c.toDataURL('image/png')
     } catch {
       return null
     }
-  }, [layer, doc, canvasMap, hiddenIds])
+  }, [layer, doc, rnodes, hiddenIds])
 
   if (!layer) {
     return (
