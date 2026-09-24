@@ -136,8 +136,15 @@ function toNode(layer: Layer, canvasMap: Map<number, HTMLCanvasElement>): PsdLay
   }
 }
 
-export function parsePsd(buffer: Uint8Array, fileName: string): ParseResult {
-  const psd: Psd = readPsd(buffer, { skipLinkedFilesData: true, skipThumbnail: true })
+export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = false): ParseResult {
+  const psd: Psd = readPsd(buffer, {
+    skipLinkedFilesData: true,
+    skipThumbnail: true,
+    // 结构阶段跳过全部图层位图，仅取树/文本/显隐/bounds（~50ms）
+    ...(structureOnly ? { skipLayerImageData: true, skipCompositeImageData: true } : {})
+  })
+  // 无图层树的扁平 PSD 只能靠合成图，结构阶段跳过合成会取不到位图，直接全量解析
+  if (structureOnly && (psd.children ?? []).length === 0) return parsePsd(buffer, fileName)
   const canvasMap = new Map<number, HTMLCanvasElement>()
   let tree: PsdLayer[] = (psd.children ?? []).map((l) => toNode(l, canvasMap))
   if (tree.length === 0 && psd.canvas) {
@@ -161,6 +168,32 @@ export function parsePsd(buffer: Uint8Array, fileName: string): ParseResult {
     ]
   }
   return { doc: { fileName, width: psd.width, height: psd.height }, tree, canvasMap }
+}
+
+// 两阶段加载的第二步：全量解码位图，按 parsePsd(structureOnly) 生成的树位置对齐，
+// 把 canvas 填进以既有节点 id 为键的 canvasMap，保证选中/显隐状态不失效
+export function decodeLayerCanvases(
+  buffer: Uint8Array,
+  tree: PsdLayer[]
+): Map<number, HTMLCanvasElement> {
+  const psd: Psd = readPsd(buffer, { skipLinkedFilesData: true, skipThumbnail: true })
+  const canvasMap = new Map<number, HTMLCanvasElement>()
+  const attach = (layers: Layer[], nodes: PsdLayer[]) => {
+    for (let i = 0; i < layers.length && i < nodes.length; i++) {
+      const layer = layers[i]
+      const node = nodes[i]
+      if (node.type === 'group') {
+        if (layer.children?.length && node.children) attach(layer.children, node.children)
+        continue
+      }
+      if (layer.canvas) {
+        const baked = bakeMask(layer)
+        canvasMap.set(node.id, baked ?? layer.canvas)
+      }
+    }
+  }
+  attach(psd.children ?? [], tree)
+  return canvasMap
 }
 
 export function flattenLayers(nodes: PsdLayer[], out: PsdLayer[] = []): PsdLayer[] {
@@ -322,9 +355,12 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
   const psd = Psd.parse(ab)
   const canvasMap = new Map<number, HTMLCanvasElement>()
 
+  // webtoon 的 children 是自上而下（顶层在前），与 ag-psd 相反；
+  // 逆序遍历，统一成自底向上，保证绘制顺序与剪贴链语义一致
   const walk = async (nodes: any[]): Promise<PsdLayer[]> => {
     const out: PsdLayer[] = []
-    for (const node of nodes) {
+    for (let k = nodes.length - 1; k >= 0; k--) {
+      const node = nodes[k]
       const id = nextId++
       const left = node.left ?? 0
       const top = node.top ?? 0
@@ -370,7 +406,8 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
           : undefined,
         clipping: node.clipping === 1,
         blendMode: WEBTOON_BLEND_TO_AG[(node.blendMode as string) ?? 'norm'] ?? 'normal',
-        children: node.children ? await walk(node.children) : undefined
+        // 必须复用上面已 walk 的结果：再 walk 一次会生成新 id，与 canvasMap 错位
+        children
       })
     }
     return out

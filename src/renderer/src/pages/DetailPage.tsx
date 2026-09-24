@@ -3,6 +3,7 @@ import type { DocSlice, ExportFormat, Project, ProjectPsd } from '@/types'
 import {
   parsePsd,
   parsePsdFallback,
+  decodeLayerCanvases,
   flattenLayers,
   buildCompositeCanvas,
   renderLayerCanvas
@@ -33,6 +34,7 @@ interface Props {
 export default function DetailPage({ project, psd, onBack }: Props) {
   const [doc, setDoc] = useState<PsdDoc | null>(null)
   const [tree, setTree] = useState<PsdLayer[]>([])
+  const [decoding, setDecoding] = useState(false)
   const canvasMapRef = useRef<Map<number, HTMLCanvasElement>>(new Map())
   const [hiddenIds, setHiddenIds] = useState<Set<number>>(new Set())
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -114,9 +116,10 @@ export default function DetailPage({ project, psd, onBack }: Props) {
         if (!alive) return
         let parsed
         try {
-          parsed = parsePsd(buffer, name)
+          // 两阶段加载：先只做结构解析（~50ms）让图层树/面板立即可用
+          parsed = parsePsd(buffer, name, true)
         } catch {
-          // 主解析器失败时使用 @webtoon/psd 兜底（支持 ZIP 压缩等）
+          // 主解析器失败时使用 @webtoon/psd 兜底（支持 ZIP 压缩等），其位图已逐层渲染
           parsed = await parsePsdFallback(buffer, name)
           toast('主解析器不支持该文件，已使用备用解析器', 'warning')
         }
@@ -133,6 +136,33 @@ export default function DetailPage({ project, psd, onBack }: Props) {
         if (rightRef.current) rightRef.current.style.width = ''
         setLeftCollapsed(false)
         setRightCollapsed(false)
+        // 结构阶段跳过了全部位图（canvasMap 为空）时，第二遍全量解码补上
+        if (parsed.canvasMap.size === 0) {
+          setDecoding(true)
+          setTimeout(async () => {
+            if (!alive) return
+            try {
+              canvasMapRef.current = decodeLayerCanvases(buffer, parsed.tree)
+              setDecoding(false)
+            } catch {
+              // ag-psd 能读结构但位图/蒙版数据解不动（如 Invalid mask size），
+              // 整文档交给备用解析器重建树+位图，节点 id 变了需重置选中态
+              try {
+                const fb = await parsePsdFallback(buffer, name)
+                if (!alive) return
+                canvasMapRef.current = fb.canvasMap
+                setDoc(fb.doc)
+                setTree(fb.tree)
+                setHiddenIds(new Set())
+                setSelectedId(null)
+                toast('主解析器不支持该文件，已使用备用解析器', 'warning')
+              } catch {
+                toast('图层位图解码失败', 'error')
+              }
+              setDecoding(false)
+            }
+          }, 80)
+        }
       })
       .catch(() => {
         if (!alive) return
@@ -555,6 +585,28 @@ export default function DetailPage({ project, psd, onBack }: Props) {
               />
             </svg>
             <span style={{ fontSize: 12, color: '#fff' }}>正在解析 PSD…</span>
+          </div>
+        )}
+
+        {decoding && (
+          <div
+            style={{
+              position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 30, display: 'flex', alignItems: 'center', gap: 8,
+              padding: '6px 14px', borderRadius: 999,
+              background: 'var(--panel)', border: '1px solid var(--line)',
+              fontSize: 12, color: 'var(--txt-2)',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.05)'
+            }}
+          >
+            <span
+              style={{
+                width: 12, height: 12, borderRadius: '50%',
+                border: '2px solid var(--line)', borderTopColor: 'var(--accent)',
+                animation: 'spin 0.8s linear infinite'
+              }}
+            />
+            正在解码图层…
           </div>
         )}
       </div>

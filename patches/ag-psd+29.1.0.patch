@@ -1,0 +1,57 @@
+diff --git a/node_modules/ag-psd/dist-es/psdReader.js b/node_modules/ag-psd/dist-es/psdReader.js
+index 0aad748..4eeee4e 100644
+--- a/node_modules/ag-psd/dist-es/psdReader.js
++++ b/node_modules/ag-psd/dist-es/psdReader.js
+@@ -501,8 +501,12 @@ function readLayerChannelImageData(reader, psd, layer, channels) {
+                 throw new Error("Missing layer ".concat(channel.id === -2 /* ChannelID.UserMask */ ? 'mask' : 'real mask', " data"));
+             var maskWidth = (mask.right || 0) - (mask.left || 0);
+             var maskHeight = (mask.bottom || 0) - (mask.top || 0);
+-            if (maskWidth < 0 || maskHeight < 0 || maskWidth > 30000 || maskHeight > 30000)
+-                throw new Error('Invalid mask size');
++            if (maskWidth < 0 || maskHeight < 0 || maskWidth > 30000 || maskHeight > 30000) {
++                // 轻切补丁：坏蒙版盒只跳过该蒙版，不整文件报错
++                mask.disabled = true;
++                reader.offset = start + channel.length;
++                continue;
++            }
+             if (maskWidth && maskHeight) {
+                 var maskData = createImageDataBitDepth(maskWidth, maskHeight, (_b = psd.bitsPerChannel) !== null && _b !== void 0 ? _b : 8);
+                 resetImageData(maskData);
+diff --git a/node_modules/ag-psd/dist/bundle.js b/node_modules/ag-psd/dist/bundle.js
+index 7d4e0bf..e201ae6 100644
+--- a/node_modules/ag-psd/dist/bundle.js
++++ b/node_modules/ag-psd/dist/bundle.js
+@@ -10141,8 +10141,12 @@ function readLayerChannelImageData(reader, psd, layer, channels) {
+                 throw new Error("Missing layer ".concat(channel.id === -2 /* ChannelID.UserMask */ ? 'mask' : 'real mask', " data"));
+             var maskWidth = (mask.right || 0) - (mask.left || 0);
+             var maskHeight = (mask.bottom || 0) - (mask.top || 0);
+-            if (maskWidth < 0 || maskHeight < 0 || maskWidth > 30000 || maskHeight > 30000)
+-                throw new Error('Invalid mask size');
++            if (maskWidth < 0 || maskHeight < 0 || maskWidth > 30000 || maskHeight > 30000) {
++                // 轻切补丁：坏蒙版盒只跳过该蒙版，不整文件报错
++                mask.disabled = true;
++                reader.offset = start + channel.length;
++                continue;
++            }
+             if (maskWidth && maskHeight) {
+                 var maskData = createImageDataBitDepth(maskWidth, maskHeight, (_b = psd.bitsPerChannel) !== null && _b !== void 0 ? _b : 8);
+                 (0, helpers_1.resetImageData)(maskData);
+diff --git a/node_modules/ag-psd/dist/psdReader.js b/node_modules/ag-psd/dist/psdReader.js
+index 778b7cb..78bc5dc 100644
+--- a/node_modules/ag-psd/dist/psdReader.js
++++ b/node_modules/ag-psd/dist/psdReader.js
+@@ -530,8 +530,12 @@ function readLayerChannelImageData(reader, psd, layer, channels) {
+                 throw new Error("Missing layer ".concat(channel.id === -2 /* ChannelID.UserMask */ ? 'mask' : 'real mask', " data"));
+             var maskWidth = (mask.right || 0) - (mask.left || 0);
+             var maskHeight = (mask.bottom || 0) - (mask.top || 0);
+-            if (maskWidth < 0 || maskHeight < 0 || maskWidth > 30000 || maskHeight > 30000)
+-                throw new Error('Invalid mask size');
++            if (maskWidth < 0 || maskHeight < 0 || maskWidth > 30000 || maskHeight > 30000) {
++                // 轻切补丁：坏蒙版盒只跳过该蒙版，不整文件报错
++                mask.disabled = true;
++                reader.offset = start + channel.length;
++                continue;
++            }
+             if (maskWidth && maskHeight) {
+                 var maskData = createImageDataBitDepth(maskWidth, maskHeight, (_b = psd.bitsPerChannel) !== null && _b !== void 0 ? _b : 8);
+                 (0, helpers_1.resetImageData)(maskData);

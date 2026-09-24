@@ -13,7 +13,8 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "gen:icon": "node scripts/gen-icon.mjs && node scripts/gen-ico.mjs",
-    "dist": "electron-vite build && node scripts/dist-retry.mjs"
+    "dist": "electron-vite build && node scripts/dist-retry.mjs",
+    "postinstall": "patch-package"
   },
   "build": {
     "appId": "com.daihongkun.qingqie",
@@ -47,6 +48,7 @@
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "patch-package": "^8.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwindcss": "^4.1.0",
