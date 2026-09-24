@@ -38,11 +38,17 @@ export function sampleColor(canvas: HTMLCanvasElement): string | null {
 
 export function layerCssSnippet(layer: PsdLayer, color: string | null): string {
   const lines = [`width: ${layer.width}px;`, `height: ${layer.height}px;`]
-  if (color && !layer.isText) {
-    lines.push(`background-color: ${color};`)
+  if (layer.isText && layer.textInfo) {
+    const ti = layer.textInfo
+    if (ti.fontSize) lines.push(`font-size: ${ti.fontSize}px;`)
+    if (ti.fontFamily) {
+      const fam = ti.fontFamily.replace(/-(Bold|Light|Regular|Medium|Thin|Black|Heavy)$/i, '')
+      lines.push(`font-family: '${fam}', sans-serif;`)
+    }
+    if (ti.fontWeight === 'bold') lines.push('font-weight: 700;')
+    if (ti.color) lines.push(`color: ${ti.color};`)
+    return lines.join('\n')
   }
-  if (layer.isText) {
-    lines.push('/* 文本图层：字体样式可在后续版本导出 */')
-  }
+  if (color) lines.push(`background-color: ${color};`)
   return lines.join('\n')
 }

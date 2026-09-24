@@ -142,3 +142,88 @@ export function OpenIcon({ className }: IconProps) {
     </svg>
   )
 }
+
+export function BackIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps} strokeWidth={1.8} strokeLinejoin="round">
+      <path d="M14.5 5.5L8 12l6.5 6.5" />
+    </svg>
+  )
+}
+
+export function PlusIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps} strokeWidth={1.8}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+export function UploadIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps} strokeWidth={1.8}>
+      <path d="M12 19V8m0 0l-4.5 4.5M12 8l4.5 4.5" />
+      <path d="M4 4.5h16" />
+    </svg>
+  )
+}
+
+export function MoonIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11Z" />
+    </svg>
+  )
+}
+
+export function SunIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4" />
+    </svg>
+  )
+}
+
+export function CaretDownIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps} strokeWidth={2}>
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  )
+}
+
+export function MoveIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps} strokeLinejoin="round">
+      <path d="M6 3l12 9-5.5 1L15 19l-2.5 1-2.4-5.8L6 17V3Z" />
+    </svg>
+  )
+}
+
+export function SliceIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps} strokeLinejoin="round">
+      <path d="M6 3v7M18 3v7M6 10h12" />
+      <path d="M12 10v5.5" />
+      <rect x="4" y="15.5" width="16" height="5.5" rx="1.5" />
+    </svg>
+  )
+}
+
+export function PickerIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <path d="M13.5 6.5l4 4L8 20H4v-4l9.5-9.5Z" />
+      <path d="M11.5 8.5l4 4M15 3.5a2.1 2.1 0 0 1 3 0l2.5 2.5a2.1 2.1 0 0 1 0 3L19 10.5" />
+    </svg>
+  )
+}
+
+export function HandIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps} strokeLinejoin="round">
+      <path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-5.5v-1a1.5 1.5 0 0 1 3 0V11m0-4.5a1.5 1.5 0 0 1 3 0V13m-9-1v-1.5a1.5 1.5 0 0 0-3 0V16a5 5 0 0 0 5 5h3a5 5 0 0 0 5-5v-2" />
+    </svg>
+  )
+}

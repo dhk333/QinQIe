@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { PsdDoc, PsdLayer } from '@/types'
-import { flattenLayers } from '@/lib/psd'
-import { FitIcon, ZoomInIcon, ZoomOutIcon } from './icons'
+import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
+import { drawSiblings, flattenLayers } from '@/lib/psd'
+
+export type CanvasTool = 'move' | 'slice' | 'picker' | 'hand'
+
+export interface CanvasViewApi {
+  fit: () => void
+  applyZoom: (target: number) => void
+  getZoom: () => number
+}
 
 interface Props {
   doc: PsdDoc | null
@@ -9,12 +16,48 @@ interface Props {
   canvasMap: Map<number, HTMLCanvasElement>
   hiddenIds: Set<number>
   selectedId: number | null
-  onSelect: (layer: PsdLayer) => void
+  onSelect: (layer: PsdLayer | null) => void
+  apiRef?: React.MutableRefObject<CanvasViewApi | null>
+  onZoomChange?: (pct: number) => void
+  tool: CanvasTool
+  slices: DocSlice[]
+  selectedSliceIds: Set<string>
+  showSlices: boolean
+  onCreateSlice: (rect: { x: number; y: number; w: number; h: number }) => void
+  onSelectSlice: (id: string | null, additive?: boolean) => void
+  onPickColor: (hex: string) => void
+  onUpdateSlice: (id: string, rect: { x: number; y: number; w: number; h: number }) => void
+  onDeleteSlice: (id: string) => void
 }
 
-interface Offset {
+type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+const HANDLES: HandleId[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+const HANDLE_CURSOR: Record<HandleId, string> = {
+  nw: 'nwse-resize', se: 'nwse-resize',
+  ne: 'nesw-resize', sw: 'nesw-resize',
+  n: 'ns-resize', s: 'ns-resize',
+  e: 'ew-resize', w: 'ew-resize'
+}
+const MIN_SLICE = 4
+
+interface DragState {
+  mode: 'pan' | 'draw' | 'move' | 'resize'
+  startX: number
+  startY: number
+  originX: number
+  originY: number
+  moved: boolean
+  docStart?: { x: number; y: number }
+  sliceId?: string
+  handle?: HandleId
+  origRect?: { x: number; y: number; w: number; h: number }
+}
+
+interface DrawRect {
   x: number
   y: number
+  w: number
+  h: number
 }
 
 function makeCheckerPattern(ctx: CanvasRenderingContext2D): CanvasPattern {
@@ -30,109 +73,82 @@ function makeCheckerPattern(ctx: CanvasRenderingContext2D): CanvasPattern {
   return ctx.createPattern(tile, 'repeat')!
 }
 
-// ag-psd 的 children 顺序为自底向上（背景层在前），按数组原序绘制
-const BLEND_MAP: Record<string, GlobalCompositeOperation> = {
-  multiply: 'multiply',
-  screen: 'screen',
-  overlay: 'overlay',
-  darken: 'darken',
-  lighten: 'lighten',
-  'color dodge': 'color-dodge',
-  'color burn': 'color-burn',
-  'hard light': 'hard-light',
-  'soft light': 'soft-light',
-  difference: 'difference',
-  exclusion: 'exclusion',
-  hue: 'hue',
-  saturation: 'saturation',
-  color: 'color',
-  luminosity: 'luminosity',
-  'linear dodge': 'lighter'
+const handlePoints = (
+  s: DocSlice,
+  zoom: number,
+  offset: { x: number; y: number }
+): { id: HandleId; x: number; y: number }[] => {
+  const x = offset.x + s.x * zoom
+  const y = offset.y + s.y * zoom
+  const w = s.w * zoom
+  const h = s.h * zoom
+  return [
+    { id: 'nw', x, y },
+    { id: 'n', x: x + w / 2, y },
+    { id: 'ne', x: x + w, y },
+    { id: 'e', x: x + w, y: y + h / 2 },
+    { id: 'se', x: x + w, y: y + h },
+    { id: 's', x: x + w / 2, y: y + h },
+    { id: 'sw', x, y: y + h },
+    { id: 'w', x, y: y + h / 2 }
+  ]
 }
 
-interface DrawContext {
-  canvasMap: Map<number, HTMLCanvasElement>
-  hiddenIds: Set<number>
-}
-
-function drawSingleLayer(ctx: CanvasRenderingContext2D, node: PsdLayer, dc: DrawContext, blend = true) {
-  if (node.hidden || dc.hiddenIds.has(node.id)) return
-  const canvas = dc.canvasMap.get(node.id)
-  if (!canvas || node.width === 0 || node.height === 0) return
-  ctx.save()
-  ctx.globalAlpha = node.opacity
-  if (blend) {
-    ctx.globalCompositeOperation = BLEND_MAP[node.blendMode] ?? 'source-over'
+function resizeRect(
+  orig: { x: number; y: number; w: number; h: number },
+  handle: HandleId,
+  dx: number,
+  dy: number
+): { x: number; y: number; w: number; h: number } {
+  let { x, y, w, h } = orig
+  if (handle.includes('e')) w = orig.w + dx
+  if (handle.includes('w')) {
+    x = orig.x + dx
+    w = orig.w - dx
   }
-  ctx.drawImage(canvas, node.left, node.top, node.width, node.height)
-  ctx.restore()
-}
-
-function drawSiblings(ctx: CanvasRenderingContext2D, nodes: PsdLayer[], dc: DrawContext) {
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i]
-    if (node.children) {
-      drawSiblings(ctx, node.children, dc)
-      continue
-    }
-    if (node.hidden || dc.hiddenIds.has(node.id)) continue
-
-    // 剪贴蒙版：连续 clipping 的图层被裁切到其下方（数组前一个）基础图层的不透明区域
-    const clipped: PsdLayer[] = []
-    let j = i + 1
-    while (j < nodes.length && nodes[j].clipping && !nodes[j].children) {
-      clipped.push(nodes[j])
-      j++
-    }
-
-    if (clipped.length === 0) {
-      drawSingleLayer(ctx, node, dc)
-      continue
-    }
-
-    const visibleClipped = clipped.filter((c) => !c.hidden && !dc.hiddenIds.has(c.id) && dc.canvasMap.has(c.id))
-    if (visibleClipped.length === 0) {
-      drawSingleLayer(ctx, node, dc)
-      i = j - 1
-      continue
-    }
-
-    const left = Math.min(node.left, ...visibleClipped.map((c) => c.left))
-    const top = Math.min(node.top, ...visibleClipped.map((c) => c.top))
-    const right = Math.max(node.left + node.width, ...visibleClipped.map((c) => c.left + c.width))
-    const bottom = Math.max(node.top + node.height, ...visibleClipped.map((c) => c.top + c.height))
-    const tmp = document.createElement('canvas')
-    tmp.width = Math.max(1, right - left)
-    tmp.height = Math.max(1, bottom - top)
-    const tctx = tmp.getContext('2d')!
-
-    const base = { ...node, left: node.left - left, top: node.top - top }
-    drawSingleLayer(tctx, base, dc, false)
-    for (const c of visibleClipped) {
-      drawSingleLayer(tctx, { ...c, left: c.left - left, top: c.top - top }, dc)
-    }
-    // 用基础图层的 alpha 裁掉溢出部分
-    tctx.globalCompositeOperation = 'destination-in'
-    tctx.globalAlpha = 1
-    const baseCanvas = dc.canvasMap.get(node.id)!
-    tctx.drawImage(baseCanvas, node.left - left, node.top - top, node.width, node.height)
-
-    ctx.save()
-    ctx.globalAlpha = node.opacity
-    ctx.drawImage(tmp, left, top)
-    ctx.restore()
-    i = j - 1
+  if (handle.includes('s')) h = orig.h + dy
+  if (handle.includes('n')) {
+    y = orig.y + dy
+    h = orig.h - dy
   }
+  if (w < MIN_SLICE) {
+    if (handle.includes('w')) x = orig.x + orig.w - MIN_SLICE
+    w = MIN_SLICE
+  }
+  if (h < MIN_SLICE) {
+    if (handle.includes('n')) y = orig.y + orig.h - MIN_SLICE
+    h = MIN_SLICE
+  }
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) }
 }
 
-export default function CanvasView({ doc, tree, canvasMap, hiddenIds, selectedId, onSelect }: Props) {
+export default function CanvasView({
+  doc,
+  tree,
+  canvasMap,
+  hiddenIds,
+  selectedId,
+  onSelect,
+  apiRef,
+  onZoomChange,
+  tool,
+  slices,
+  selectedSliceIds,
+  showSlices,
+  onCreateSlice,
+  onSelectSlice,
+  onPickColor,
+  onUpdateSlice,
+  onDeleteSlice
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [zoom, setZoom] = useState(1)
-  const [offset, setOffset] = useState<Offset>({ x: 0, y: 0 })
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const [drawingRect, setDrawingRect] = useState<DrawRect | null>(null)
   const lastFitDoc = useRef<string>('')
-  const drag = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null)
+  const drag = useRef<DragState | null>(null)
 
   useEffect(() => {
     const el = containerRef.current
@@ -159,6 +175,27 @@ export default function CanvasView({ doc, tree, canvasMap, hiddenIds, selectedId
     }
   }, [doc, size.w, fit])
 
+  const applyZoom = useCallback(
+    (target: number) => {
+      setZoom((prev) => {
+        const clamped = Math.max(0.02, Math.min(32, target))
+        setOffset((o) => ({
+          x: size.w / 2 - ((size.w / 2 - o.x) / prev) * clamped,
+          y: size.h / 2 - ((size.h / 2 - o.y) / prev) * clamped
+        }))
+        return clamped
+      })
+    },
+    [size.w, size.h]
+  )
+
+  useEffect(() => {
+    onZoomChange?.(Math.round(zoom * 100))
+  }, [zoom, onZoomChange])
+
+  useImperativeHandle(apiRef, () => ({ fit, applyZoom, getZoom: () => zoom }), [fit, applyZoom, zoom])
+
+  // 绘制
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !doc || size.w === 0) return
@@ -173,12 +210,15 @@ export default function CanvasView({ doc, tree, canvasMap, hiddenIds, selectedId
     ctx.save()
     ctx.translate(offset.x, offset.y)
     ctx.scale(zoom, zoom)
-
     ctx.fillStyle = makeCheckerPattern(ctx)
     ctx.fillRect(0, 0, doc.width, doc.height)
     drawSiblings(ctx, tree, { canvasMap, hiddenIds })
     ctx.restore()
 
+    const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#4c7bf3'
+    const accent2 = getComputedStyle(document.body).getPropertyValue('--accent-2').trim() || accent
+
+    // 图层选中
     if (selectedId != null) {
       const layer = flattenLayers(tree).find((l) => l.id === selectedId)
       if (layer) {
@@ -186,11 +226,10 @@ export default function CanvasView({ doc, tree, canvasMap, hiddenIds, selectedId
         const y = offset.y + layer.top * zoom
         const w = layer.width * zoom
         const h = layer.height * zoom
-        ctx.strokeStyle = '#8b5cf6'
+        ctx.strokeStyle = accent
         ctx.lineWidth = 1
         ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1)
-        // 四角标记
-        ctx.strokeStyle = '#a78bfa'
+        ctx.strokeStyle = accent2
         ctx.lineWidth = 2
         const s = 6
         const corners: [number, number, number, number][] = [
@@ -206,13 +245,74 @@ export default function CanvasView({ doc, tree, canvasMap, hiddenIds, selectedId
           ctx.lineTo(cx, cy + dy * s)
           ctx.stroke()
         }
-        ctx.fillStyle = '#8b5cf6'
+        ctx.fillStyle = accent
         ctx.font = '11px sans-serif'
         ctx.fillText(`${layer.width} × ${layer.height}`, x, y - 6)
       }
     }
-  }, [doc, tree, canvasMap, hiddenIds, selectedId, zoom, offset, size])
 
+    // 切片
+    if (showSlices) {
+      const singleSelected =
+        selectedSliceIds.size === 1 ? slices.find((s) => selectedSliceIds.has(s.id)) ?? null : null
+      for (const s of slices) {
+        const x = offset.x + s.x * zoom
+        const y = offset.y + s.y * zoom
+        const w = s.w * zoom
+        const h = s.h * zoom
+        const selected = selectedSliceIds.has(s.id)
+        ctx.fillStyle = selected ? 'rgba(76,123,243,0.16)' : 'rgba(76,123,243,0.06)'
+        ctx.fillRect(x, y, w, h)
+        ctx.strokeStyle = accent
+        ctx.lineWidth = selected ? 1.5 : 1
+        ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1)
+        const label = s.no
+        ctx.font = '10px Consolas, monospace'
+        const tw = ctx.measureText(label).width + 10
+        ctx.fillStyle = accent
+        ctx.fillRect(x, y, tw, 15)
+        ctx.fillStyle = '#fff'
+        ctx.fillText(label, x + 5, y + 11)
+        // 右上角删除按钮
+        ctx.fillStyle = '#fff'
+        ctx.strokeStyle = '#ef4444'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.rect(x + w - 15, y + 2, 13, 13)
+        ctx.fill()
+        ctx.stroke()
+        ctx.strokeStyle = '#ef4444'
+        ctx.beginPath()
+        ctx.moveTo(x + w - 11, y + 6)
+        ctx.lineTo(x + w - 5, y + 12)
+        ctx.moveTo(x + w - 5, y + 6)
+        ctx.lineTo(x + w - 11, y + 12)
+        ctx.stroke()
+        // 单选时的 8 个控制柄
+        if (singleSelected?.id === s.id) {
+          ctx.fillStyle = '#fff'
+          ctx.strokeStyle = accent
+          ctx.lineWidth = 1.5
+          for (const hx of handlePoints(s, zoom, offset)) {
+            ctx.beginPath()
+            ctx.rect(hx.x - 3.5, hx.y - 3.5, 7, 7)
+            ctx.fill()
+            ctx.stroke()
+          }
+        }
+      }
+      if (drawingRect) {
+        const x = offset.x + drawingRect.x * zoom
+        const y = offset.y + drawingRect.y * zoom
+        ctx.setLineDash([4, 3])
+        ctx.strokeStyle = accent2
+        ctx.strokeRect(x - 0.5, y - 0.5, drawingRect.w * zoom + 1, drawingRect.h * zoom + 1)
+        ctx.setLineDash([])
+      }
+    }
+  }, [doc, tree, canvasMap, hiddenIds, selectedId, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect])
+
+  // 滚轮缩放
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -235,12 +335,25 @@ export default function CanvasView({ doc, tree, canvasMap, hiddenIds, selectedId
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  const hitTest = (mx: number, my: number): PsdLayer | null => {
+  const hitSlice = (mx: number, my: number): DocSlice | null => {
+    const dx = (mx - offset.x) / zoom
+    const dy = (my - offset.y) / zoom
+    for (let i = slices.length - 1; i >= 0; i--) {
+      const s = slices[i]
+      if (dx >= s.x && dx <= s.x + s.w && dy >= s.y && dy <= s.y + s.h) return s
+    }
+    return null
+  }
+
+  const hitLayer = (mx: number, my: number): PsdLayer | null => {
     if (!doc) return null
     const dx = (mx - offset.x) / zoom
     const dy = (my - offset.y) / zoom
+    // 自顶向下找候选（flattenLayers 为自底向上，需倒序）
     const all = flattenLayers(tree)
-    for (const layer of all) {
+    const rectHits: PsdLayer[] = []
+    for (let i = all.length - 1; i >= 0; i--) {
+      const layer = all[i]
       if (layer.children || layer.hidden || hiddenIds.has(layer.id)) continue
       if (!canvasMap.has(layer.id)) continue
       if (
@@ -249,54 +362,209 @@ export default function CanvasView({ doc, tree, canvasMap, hiddenIds, selectedId
         dy >= layer.top &&
         dy <= layer.top + layer.height
       ) {
-        return layer
+        rectHits.push(layer)
       }
+    }
+    // 优先命中不透明像素（容差随缩放变化，约 2 个屏幕像素）
+    const r = Math.max(0, Math.ceil(2 / zoom))
+    for (const layer of rectHits) {
+      const c = canvasMap.get(layer.id)!
+      const cctx = c.getContext('2d')
+      if (!cctx) continue
+      const px = dx - layer.left
+      const py = dy - layer.top
+      const sx = c.width / Math.max(1, layer.width)
+      const sy = c.height / Math.max(1, layer.height)
+      const bx = Math.round(px * sx)
+      const by = Math.round(py * sy)
+      const rad = Math.round(r * sx)
+      try {
+        const x0 = Math.max(0, bx - rad)
+        const y0 = Math.max(0, by - rad)
+        const w = Math.min(c.width - x0, rad * 2 + 1)
+        const h = Math.min(c.height - y0, rad * 2 + 1)
+        if (w <= 0 || h <= 0) continue
+        const d = cctx.getImageData(x0, y0, w, h).data
+        for (let i = 3; i < d.length; i += 4) {
+          if (d[i] > 0) return layer
+        }
+      } catch {
+        // getImageData 失败时退回矩形命中
+      }
+    }
+    return rectHits[0] ?? null
+  }
+
+  const pickColor = (mx: number, my: number): string | null => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const dpr = window.devicePixelRatio || 1
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    try {
+      const d = ctx.getImageData(Math.round(mx * dpr), Math.round(my * dpr), 1, 1).data
+      if (d[3] === 0) return null
+      return `#${[d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`.toUpperCase()
+    } catch {
+      return null
+    }
+  }
+
+  const hitHandle = (mx: number, my: number, s: DocSlice): HandleId | null => {
+    for (const p of handlePoints(s, zoom, offset)) {
+      if (Math.abs(mx - p.x) <= 6 && Math.abs(my - p.y) <= 6) return p.id
     }
     return null
   }
 
+  const hitDeleteBadge = (mx: number, my: number, s: DocSlice): boolean => {
+    const bx = offset.x + s.x * zoom + s.w * zoom - 15
+    const by = offset.y + s.y * zoom + 2
+    return mx >= bx && mx <= bx + 13 && my >= by && my <= by + 13
+  }
+
   const onMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return
     const rect = containerRef.current!.getBoundingClientRect()
-    drag.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      originX: offset.x,
-      originY: offset.y,
-      moved: false
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    if (tool === 'slice') {
+      // 删除按钮优先
+      for (let i = slices.length - 1; i >= 0; i--) {
+        if (hitDeleteBadge(mx, my, slices[i])) {
+          onDeleteSlice(slices[i].id)
+          return
+        }
+      }
+      const docStart = { x: (mx - offset.x) / zoom, y: (my - offset.y) / zoom }
+      if (selectedSliceIds.size === 1) {
+        const sel = slices.find((s) => selectedSliceIds.has(s.id))
+        if (sel) {
+          const h = hitHandle(mx, my, sel)
+          if (h) {
+            drag.current = {
+              mode: 'resize', startX: mx, startY: my, originX: offset.x, originY: offset.y,
+              moved: false, sliceId: sel.id, handle: h, docStart, origRect: { ...sel }
+            }
+            return
+          }
+        }
+      }
+      const hit = hitSlice(mx, my)
+      if (hit) {
+        drag.current = {
+          mode: 'move', startX: mx, startY: my, originX: offset.x, originY: offset.y,
+          moved: false, sliceId: hit.id, docStart, origRect: { ...hit }
+        }
+        return
+      }
+      drag.current = { mode: 'draw', startX: mx, startY: my, originX: offset.x, originY: offset.y, moved: false, docStart }
+      return
     }
-    void rect
+    drag.current = { mode: 'pan', startX: mx, startY: my, originX: offset.x, originY: offset.y, moved: false }
   }
 
   const onMouseMove = (e: React.MouseEvent) => {
+    const rect = containerRef.current!.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
     const d = drag.current
-    if (!d) return
-    const dx = e.clientX - d.startX
-    const dy = e.clientY - d.startY
+    if (!d) {
+      // 悬停光标
+      const el = containerRef.current
+      if (el) {
+        if (tool === 'slice') {
+          const onBadge = slices.some((s) => hitDeleteBadge(mx, my, s))
+          el.style.cursor = onBadge ? 'pointer' : 'crosshair'
+        } else {
+          el.style.cursor = tool === 'hand' ? 'grab' : 'default'
+        }
+      }
+      return
+    }
+    const docCur = { x: (mx - offset.x) / zoom, y: (my - offset.y) / zoom }
+    if (d.mode === 'draw' && d.docStart) {
+      setDrawingRect({
+        x: Math.min(d.docStart.x, docCur.x),
+        y: Math.min(d.docStart.y, docCur.y),
+        w: Math.abs(docCur.x - d.docStart.x),
+        h: Math.abs(docCur.y - d.docStart.y)
+      })
+      return
+    }
+    const dx = mx - d.startX
+    const dy = my - d.startY
     if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
-    if (d.moved) {
-      setOffset({ x: d.originX + dx, y: d.originY + dy })
+    if (d.mode === 'pan') {
+      if (d.moved) setOffset({ x: d.originX + dx, y: d.originY + dy })
+      return
+    }
+    if (d.mode === 'move' && d.origRect && d.moved && d.docStart) {
+      onUpdateSlice(d.sliceId!, {
+        x: Math.round(d.origRect.x + (docCur.x - d.docStart.x)),
+        y: Math.round(d.origRect.y + (docCur.y - d.docStart.y)),
+        w: d.origRect.w,
+        h: d.origRect.h
+      })
+      return
+    }
+    if (d.mode === 'resize' && d.origRect && d.handle && d.docStart) {
+      onUpdateSlice(
+        d.sliceId!,
+        resizeRect(d.origRect, d.handle, docCur.x - d.docStart.x, docCur.y - d.docStart.y)
+      )
     }
   }
 
   const onMouseUp = (e: React.MouseEvent) => {
     const d = drag.current
     drag.current = null
-    if (!d || d.moved) return
+    if (!d) return
     const rect = containerRef.current!.getBoundingClientRect()
-    const layer = hitTest(e.clientX - rect.left, e.clientY - rect.top)
-    if (layer) onSelect(layer)
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+
+    if (d.mode === 'draw') {
+      const rectDoc = drawingRect
+      setDrawingRect(null)
+      if (rectDoc && rectDoc.w >= 8 && rectDoc.h >= 8) {
+        onCreateSlice({
+          x: Math.round(rectDoc.x),
+          y: Math.round(rectDoc.y),
+          w: Math.round(rectDoc.w),
+          h: Math.round(rectDoc.h)
+        })
+      } else {
+        const hit = hitSlice(mx, my)
+        if (hit) onSelectSlice(hit.id, e.shiftKey || e.ctrlKey || e.metaKey)
+        else if (!(e.shiftKey || e.ctrlKey || e.metaKey)) onSelectSlice(null)
+      }
+      return
+    }
+    if (d.mode === 'pan' && !d.moved) {
+      if (tool === 'move') {
+        onSelect(hitLayer(mx, my))
+      } else if (tool === 'picker') {
+        const hex = pickColor(mx, my)
+        if (hex) onPickColor(hex)
+      }
+      return
+    }
+    if (!d.moved && d.sliceId) onSelectSlice(d.sliceId, e.shiftKey || e.ctrlKey || e.metaKey)
   }
+
+  const cursor = tool === 'slice' ? 'crosshair' : tool === 'hand' ? 'grab' : 'default'
 
   if (!doc) {
     return (
       <div ref={containerRef} className="flex flex-1 items-center justify-center bg-bg">
         <div className="flex flex-col items-center gap-4 text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
-            <span className="text-2xl font-bold text-violet-400">切</span>
+            <span className="text-2xl font-bold text-accent-2">切</span>
           </div>
           <div>
             <p className="text-[15px] font-medium text-txt">打开一个 PSD 文件开始切图</p>
-            <p className="mt-1 text-[12px] text-txt-3">点击右上角「打开 PSD」，或把文件拖到这里</p>
+            <p className="mt-1 text-[12px] text-txt-3">在项目页上传 PSD 后点击画板进入</p>
           </div>
         </div>
       </div>
@@ -310,40 +578,9 @@ export default function CanvasView({ doc, tree, canvasMap, hiddenIds, selectedId
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
-      style={{ cursor: drag.current ? 'grabbing' : 'default' }}
+      style={{ cursor }}
     >
       <canvas ref={canvasRef} className="absolute inset-0" />
-      <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-border bg-panel/90 px-1.5 py-1 shadow-lg backdrop-blur">
-        <button
-          className="icon-btn"
-          title="缩小"
-          onClick={() => {
-            const next = Math.max(0.02, zoom / 1.2)
-            setOffset((o) => ({ x: size.w / 2 - ((size.w / 2 - o.x) / zoom) * next, y: size.h / 2 - ((size.h / 2 - o.y) / zoom) * next }))
-            setZoom(next)
-          }}
-        >
-          <ZoomOutIcon className="h-4 w-4" />
-        </button>
-        <span className="min-w-[52px] text-center text-[12px] text-txt-2">
-          {Math.round(zoom * 100)}%
-        </span>
-        <button
-          className="icon-btn"
-          title="放大"
-          onClick={() => {
-            const next = Math.min(32, zoom * 1.2)
-            setOffset((o) => ({ x: size.w / 2 - ((size.w / 2 - o.x) / zoom) * next, y: size.h / 2 - ((size.h / 2 - o.y) / zoom) * next }))
-            setZoom(next)
-          }}
-        >
-          <ZoomInIcon className="h-4 w-4" />
-        </button>
-        <span className="mx-1 h-4 w-px bg-border" />
-        <button className="icon-btn" title="适应窗口" onClick={fit}>
-          <FitIcon className="h-4 w-4" />
-        </button>
-      </div>
     </div>
   )
 }

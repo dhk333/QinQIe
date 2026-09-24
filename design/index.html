@@ -94,7 +94,7 @@ body, .titlebar, .modal { transition: background-color 0.2s ease, color 0.2s eas
 .stagger > * { opacity: 0; transform: translateY(8px); }
 .stagger.animate > * {
   opacity: 1; transform: none;
-  transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+  transition: opacity 0.45s var(--ease), transform 0.45s var(--ease);
 }
 .grp.dropped-ok { background: var(--accent-dim); color: var(--accent-2); }
 .proj-card:active { transform: translateY(-1px) scale(0.98); }
@@ -1388,10 +1388,10 @@ function staggerIn(container) {
   if (items.length === 0 || document.visibilityState !== 'visible') return
   container.classList.add('stagger')
   void container.offsetWidth
-  items.forEach((el, i) => { el.style.transitionDelay = Math.min(i * 25, 300) + 'ms' })
+  items.forEach((el, i) => { el.style.transitionDelay = Math.min(i * 40, 480) + 'ms' })
   container.classList.add('animate')
   clearTimeout(container._staggerT)
-  container._staggerT = setTimeout(() => items.forEach((el) => { el.style.transitionDelay = '' }), 900)
+  container._staggerT = setTimeout(() => items.forEach((el) => { el.style.transitionDelay = '' }), 1400)
 }
 
 // ========== 通用弹窗与轻提示 ==========

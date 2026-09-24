@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PsdLayer } from '@/types'
 import {
   ChevronDownIcon,
@@ -68,8 +68,9 @@ function Row({
     <>
       <div
         className={`group flex h-7 cursor-default items-center gap-1 rounded-md pr-1.5 text-[12px] ${
-          isSelected ? 'bg-violet-600/25 text-txt' : 'text-txt-2 hover:bg-panel-2'
+          isSelected ? 'bg-accent-dim text-txt' : 'text-txt-2 hover:bg-panel-2'
         }`}
+        data-layer-id={layer.id}
         style={{ paddingLeft: 6 + depth * 14 }}
         onClick={() => onSelect(layer)}
       >
@@ -136,6 +137,37 @@ export default function LayerTree({
 }: Props) {
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // 外部（画布点击）选中时：展开祖先分组并滚动到可见
+  useEffect(() => {
+    if (selectedId == null) return
+    const path: number[] = []
+    const find = (nodes: PsdLayer[], acc: number[]): boolean => {
+      for (const n of nodes) {
+        if (n.id === selectedId) {
+          path.push(...acc)
+          return true
+        }
+        if (n.children && find(n.children, [...acc, n.id])) return true
+      }
+      return false
+    }
+    if (path.length) {
+      setCollapsed((prev) => {
+        const next = new Set(prev)
+        for (const id of path) next.delete(id)
+        return next
+      })
+    }
+    // collapsed 更新后的渲染完成再滚动
+    const t = setTimeout(() => {
+      listRef.current
+        ?.querySelector(`[data-layer-id="${selectedId}"]`)
+        ?.scrollIntoView({ block: 'nearest' })
+    }, 0)
+    return () => clearTimeout(t)
+  }, [selectedId, tree])
 
   const filtered = useMemo(
     () => filterTree(tree, query.trim().toLowerCase()),
@@ -152,7 +184,7 @@ export default function LayerTree({
   }
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-panel">
+    <aside className="flex w-full min-h-0 flex-1 flex-col border-r border-border bg-panel">
       <div className="flex h-10 items-center justify-between border-b border-border px-3">
         <span className="text-[12px] font-medium text-txt-2">图层</span>
         <span className="text-[11px] text-txt-3">{tree.length}</span>
@@ -168,7 +200,7 @@ export default function LayerTree({
           />
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-1.5">
+      <div ref={listRef} className="flex-1 overflow-y-auto p-1.5">
         {filtered.length === 0 ? (
           <p className="px-2 py-4 text-center text-[12px] text-txt-3">
             {tree.length === 0 ? '尚未打开 PSD 文件' : '没有匹配的图层'}

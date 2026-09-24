@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react'
-import type { ExportFormat, PsdLayer } from '@/types'
+import type { ExportFormat, PsdDoc, PsdLayer } from '@/types'
 import { layerCssSnippet, sampleColor } from '@/lib/export'
+import { renderLayerCanvas } from '@/lib/psd'
 import { CheckIcon, CopyIcon } from './icons'
 
 interface Props {
   layer: PsdLayer | null
+  doc: PsdDoc | null
   canvasMap: Map<number, HTMLCanvasElement>
+  hiddenIds: Set<number>
   onExport: (format: ExportFormat, scale: number) => void
 }
 
@@ -29,20 +32,30 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export default function PropertiesPanel({ layer, canvasMap, onExport }: Props) {
+export default function PropertiesPanel({ layer, doc, canvasMap, hiddenIds, onExport }: Props) {
   const [format, setFormat] = useState<ExportFormat>('png')
   const [scale, setScale] = useState(2)
-  const [copied, setCopied] = useState<'css' | 'color' | null>(null)
+  const [copied, setCopied] = useState<'css' | 'color' | 'text' | null>(null)
 
   const color = useMemo(
     () => (layer ? sampleColor(canvasMap.get(layer.id)!) : null),
     [layer, canvasMap]
   )
   const css = useMemo(() => (layer ? layerCssSnippet(layer, color) : ''), [layer, color])
+  const previewUrl = useMemo(() => {
+    if (!layer || !doc) return null
+    try {
+      const c = renderLayerCanvas(layer, doc, canvasMap, hiddenIds)
+      if (!c || !c.width || !c.height) return null
+      return c.toDataURL('image/png')
+    } catch {
+      return null
+    }
+  }, [layer, doc, canvasMap, hiddenIds])
 
   if (!layer) {
     return (
-      <aside className="flex w-72 shrink-0 flex-col border-l border-border bg-panel">
+      <aside className="flex w-full min-h-0 flex-1 flex-col bg-panel">
         <div className="flex h-10 items-center border-b border-border px-4 text-[12px] font-medium text-txt-2">
           属性
         </div>
@@ -53,7 +66,7 @@ export default function PropertiesPanel({ layer, canvasMap, onExport }: Props) {
     )
   }
 
-  const copy = async (text: string, kind: 'css' | 'color') => {
+  const copy = async (text: string, kind: 'css' | 'color' | 'text') => {
     await navigator.clipboard.writeText(text)
     setCopied(kind)
     setTimeout(() => setCopied(null), 1200)
@@ -62,7 +75,7 @@ export default function PropertiesPanel({ layer, canvasMap, onExport }: Props) {
   const typeLabel = layer.type === 'group' ? '图层组' : layer.isText ? '文本图层' : '像素图层'
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-panel">
+    <aside className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto bg-panel">
       <div className="flex h-10 items-center border-b border-border px-4 text-[12px] font-medium text-txt-2">
         属性
       </div>
@@ -97,6 +110,47 @@ export default function PropertiesPanel({ layer, canvasMap, onExport }: Props) {
         </Section>
       )}
 
+      {layer.textInfo && (
+        <Section title="文本">
+          <div className="text-box" onClick={() => void copy(layer.textInfo!.content, 'text')}>
+            <button
+              className="cp"
+              title="复制文本"
+              onClick={(e) => {
+                e.stopPropagation()
+                void copy(layer.textInfo!.content, 'text')
+              }}
+            >
+              {copied === 'text' ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+            </button>
+            {layer.textInfo.content}
+          </div>
+          <div style={{ marginTop: 8 }}>
+            {layer.textInfo.fontSize != null && (
+              <InfoRow label="字体大小" value={`${layer.textInfo.fontSize} px`} />
+            )}
+            {layer.textInfo.color && (
+              <div className="flex items-center justify-between py-0.5">
+                <span className="text-[12px] text-txt-3">字体颜色</span>
+                <span
+                  className="flex items-center gap-1.5 font-mono text-[11px] text-txt"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => void copy(layer.textInfo!.color!, 'color')}
+                >
+                  <span
+                    className="h-3 w-3 rounded-sm border border-border-light"
+                    style={{ background: layer.textInfo.color }}
+                  />
+                  {layer.textInfo.color}
+                </span>
+              </div>
+            )}
+            {layer.textInfo.fontWeight && <InfoRow label="字重" value={layer.textInfo.fontWeight} />}
+            {layer.textInfo.fontFamily && <InfoRow label="字体" value={layer.textInfo.fontFamily} />}
+          </div>
+        </Section>
+      )}
+
       <Section title="CSS">
         <div className="relative rounded-lg border border-border bg-panel-2">
           <button
@@ -117,6 +171,13 @@ export default function PropertiesPanel({ layer, canvasMap, onExport }: Props) {
       </Section>
 
       <Section title="导出设置">
+        <div className="layer-preview">
+          {previewUrl ? (
+            <img src={previewUrl} alt="" />
+          ) : (
+            <span>该图层暂无位图内容</span>
+          )}
+        </div>
         <div className="mb-3 flex gap-1.5">
           {(
             [
@@ -128,9 +189,9 @@ export default function PropertiesPanel({ layer, canvasMap, onExport }: Props) {
             <button
               key={f}
               onClick={() => setFormat(f)}
-              className={`flex-1 rounded-md border px-2 py-1.5 text-[12px] transition-colors ${
+              className={`flex-1 cursor-pointer rounded-md border px-2 py-1.5 text-[12px] transition-colors ${
                 format === f
-                  ? 'border-violet-500 bg-violet-600/20 text-txt'
+                  ? 'border-accent bg-accent-dim text-txt'
                   : 'border-border bg-panel-2 text-txt-2 hover:border-border-light'
               }`}
             >
@@ -143,9 +204,9 @@ export default function PropertiesPanel({ layer, canvasMap, onExport }: Props) {
             <button
               key={s}
               onClick={() => setScale(s)}
-              className={`flex-1 rounded-md border px-2 py-1.5 text-[12px] transition-colors ${
+              className={`flex-1 cursor-pointer rounded-md border px-2 py-1.5 text-[12px] transition-colors ${
                 scale === s
-                  ? 'border-violet-500 bg-violet-600/20 text-txt'
+                  ? 'border-accent bg-accent-dim text-txt'
                   : 'border-border bg-panel-2 text-txt-2 hover:border-border-light'
               }`}
             >
@@ -153,7 +214,7 @@ export default function PropertiesPanel({ layer, canvasMap, onExport }: Props) {
             </button>
           ))}
         </div>
-        <button className="btn-primary w-full" onClick={() => onExport(format, scale)}>
+        <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => onExport(format, scale)}>
           导出所选图层
         </button>
       </Section>
