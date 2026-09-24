@@ -24,11 +24,11 @@
   --amber: #fbbf24;
   --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
   --sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
-  --accent: #8b5cf6;
-  --accent-2: #a78bfa;
-  --accent-dim: rgba(139, 92, 246, 0.16);
-  --accent-grad: linear-gradient(135deg, #7c3aed, #8b5cf6 55%, #a78bfa);
-  --accent-glow: rgba(139, 92, 246, 0.4);
+  --accent: #4c7bf3;
+  --accent-2: #6f92ff;
+  --accent-dim: rgba(76, 123, 243, 0.16);
+  --accent-grad: linear-gradient(135deg, #3a66e0, #4c7bf3 55%, #6f92ff);
+  --accent-glow: rgba(76, 123, 243, 0.4);
   --titlebar-bg: linear-gradient(180deg, #101012, #0c0c0e);
   --overlay: rgba(18, 18, 21, 0.88);
   --noise-opacity: 0.35;
@@ -36,7 +36,7 @@
   --checker-2: #1b1b1f;
   --art-shadow: 0 24px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line-2);
 }
-/* 亮色主题（参考蓝湖：浅灰底 + 白面板 + 蓝色主色） */
+/* 亮色主题（参考蓝湖：浅灰底 + 白面板；主色与暗色一致，不随主题切换） */
 body.light {
   --bg: #f3f5f9;
   --panel: #ffffff;
@@ -47,11 +47,8 @@ body.light {
   --txt: #1f2430;
   --txt-2: #5c6572;
   --txt-3: #9aa3b0;
-  --accent: #4c7bf3;
-  --accent-2: #3a66e0;
-  --accent-dim: rgba(76, 123, 243, 0.12);
-  --accent-grad: linear-gradient(135deg, #3a66e0, #4c7bf3 55%, #6f92ff);
-  --accent-glow: rgba(76, 123, 243, 0.35);
+  --green: #16a34a;
+  --amber: #d97706;
   --titlebar-bg: linear-gradient(180deg, #ffffff, #fafbfd);
   --overlay: rgba(255, 255, 255, 0.92);
   --noise-opacity: 0.15;
@@ -131,7 +128,6 @@ body::before {
 .btn-primary {
   color: #fff;
   background: var(--accent-grad);
-  box-shadow: 0 4px 16px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.2);
 }
 .btn-primary:hover { filter: brightness(1.12); transform: translateY(-1px); }
 .btn-primary:active { transform: scale(0.97); }
@@ -313,7 +309,7 @@ body::before {
   display: flex; align-items: center; gap: 2px;
   background: var(--overlay); backdrop-filter: blur(10px);
   border: 1px solid var(--line-2); border-radius: 999px;
-  padding: 5px 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  padding: 5px 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   z-index: 5;
 }
 .zoombar .zb {
@@ -359,7 +355,6 @@ body::before {
 .swatch {
   width: 22px; height: 22px; border-radius: 6px;
   background: #2f6fbd;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15), 0 2px 8px rgba(0,0,0,0.4);
 }
 .color-row .hex { flex: 1; font-family: var(--mono); font-size: 12px; }
 .color-row .sub { font-family: var(--mono); font-size: 9px; color: var(--txt-3); }
@@ -413,7 +408,7 @@ body::before {
   background: var(--overlay); backdrop-filter: blur(10px);
   border: 1px solid var(--line-2); border-radius: 999px;
   padding: 7px 8px 7px 16px; z-index: 6;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   animation: rise 0.5s cubic-bezier(0.22,1,0.36,1) 0.8s both;
 }
 .batch-bar .label { font-family: var(--mono); font-size: 10px; color: var(--txt-2); }
@@ -441,6 +436,65 @@ body::before {
 .theme-toggle .icon-sun { display: none; }
 body.light .theme-toggle .icon-sun { display: block; }
 body.light .theme-toggle .icon-moon { display: none; }
+
+/* ========== 工具条（参考 PS） ========== */
+.toolbar {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--overlay); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2); border-radius: 11px; padding: 5px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  z-index: 6;
+}
+.tool {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: 8px; color: var(--txt-2); cursor: pointer;
+  transition: all 0.15s; position: relative;
+}
+.tool:hover { background: var(--panel-3); color: var(--txt); }
+.tool.active { background: var(--accent-dim); color: var(--accent-2); }
+.tool.active::before {
+  content: ""; position: absolute; left: -5px; top: 8px; bottom: 8px;
+  width: 2px; border-radius: 2px; background: var(--accent);
+}
+.tool svg { width: 15px; height: 15px; }
+.tool .kbd {
+  position: absolute; right: 2px; bottom: 1px;
+  font-family: var(--mono); font-size: 7px; color: var(--txt-3);
+}
+.tool-sep { height: 1px; background: var(--line-2); margin: 3px 5px; }
+
+/* ========== 切片 ========== */
+.slice {
+  position: absolute; z-index: 2;
+  border: 1px solid var(--accent);
+  background: rgba(76, 123, 243, 0.05);
+  cursor: pointer; transition: background 0.15s;
+}
+.slice:hover { background: rgba(76, 123, 243, 0.1); }
+.slice.selected { background: rgba(76, 123, 243, 0.14); box-shadow: inset 0 0 0 1px var(--accent); }
+.slice .no {
+  position: absolute; top: -1px; left: -1px;
+  font-family: var(--mono); font-size: 9px; line-height: 1; color: #fff;
+  background: var(--accent); padding: 3px 7px 4px;
+  border-radius: 0 0 6px 0;
+}
+.slice .del {
+  position: absolute; top: -9px; right: -9px;
+  width: 18px; height: 18px; display: none; place-items: center;
+  background: var(--panel); border: 1px solid var(--line-2);
+  border-radius: 50%; color: var(--txt-2); font-size: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+.slice:hover .del { display: grid; }
+.slice .del:hover { color: #ef4444; border-color: #ef4444; }
+.slice-preview {
+  position: absolute; z-index: 2; pointer-events: none;
+  border: 1px dashed var(--accent);
+  background: rgba(76, 123, 243, 0.08);
+}
+.artboard.slicing { cursor: crosshair; }
+.artboard.slices-hidden .slice { display: none; }
 </style>
 </head>
 <body>
@@ -550,6 +604,36 @@ body.light .theme-toggle .icon-moon { display: none; }
     <!-- 中：画布 -->
     <div class="canvas-wrap">
       <div class="corner"></div>
+
+      <!-- 工具条 -->
+      <div class="toolbar" id="toolbar">
+        <span class="tool" data-tool="move" title="移动 / 选择图层 (V)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l12 9-5.5 1L15 19l-2.5 1-2.4-5.8L6 17V3Z"/></svg>
+          <span class="kbd">V</span>
+        </span>
+        <span class="tool active" data-tool="slice" title="切片工具 (C) — 拖拽画切片">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7M18 3v7M6 10h12"/><path d="M12 10v5.5"/><rect x="4" y="15.5" width="16" height="5.5" rx="1.5"/></svg>
+          <span class="kbd">C</span>
+        </span>
+        <span class="tool" data-tool="picker" title="取色器 (I)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M13.5 6.5l4 4L8 20H4v-4l9.5-9.5Z"/><path d="M11.5 8.5l4 4M15 3.5a2.1 2.1 0 0 1 3 0l2.5 2.5a2.1 2.1 0 0 1 0 3L19 10.5"/></svg>
+          <span class="kbd">I</span>
+        </span>
+        <span class="tool-sep"></span>
+        <span class="tool" data-tool="hand" title="抓手 (H) — 拖拽平移">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-5.5v-1a1.5 1.5 0 0 1 3 0V11m0-4.5a1.5 1.5 0 0 1 3 0V13m-9-1v-1.5a1.5 1.5 0 0 0-3 0V16a5 5 0 0 0 5 5h3a5 5 0 0 0 5-5v-2"/></svg>
+          <span class="kbd">H</span>
+        </span>
+        <span class="tool" data-tool="zoom" title="缩放 (Z)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M11 8.5v5M8.5 11h5"/></svg>
+          <span class="kbd">Z</span>
+        </span>
+        <span class="tool-sep"></span>
+        <span class="tool" id="toggleSlices" title="显示 / 隐藏切片">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>
+        </span>
+      </div>
+
       <div class="ruler-x">
         <div class="tick" style="left:60px"><span>100</span></div>
         <div class="tick" style="left:126px"><span>200</span></div>
@@ -597,6 +681,11 @@ body.light .theme-toggle .icon-moon { display: none; }
               <div class="mock-card"><i></i><s></s><s style="width:70%;margin-top:4px"></s></div>
             </div>
           </div>
+          <!-- 预置切片（参考 PS 切片编号） -->
+          <div class="slice" style="left:0; top:0; width:672px; height:46px"><span class="no">01</span><span class="del">✕</span></div>
+          <div class="slice selected" style="left:118px; top:236px; width:330px; height:140px"><span class="no">02</span><span class="del">✕</span></div>
+          <div class="slice" style="left:118px; top:354px; width:254px; height:52px"><span class="no">03</span><span class="del">✕</span></div>
+          <div class="slice" style="left:384px; top:354px; width:254px; height:52px"><span class="no">04</span><span class="del">✕</span></div>
           <div class="hover-ghost"></div>
           <div class="selection">
             <span class="handle h-tl"></span><span class="handle h-tr"></span>
@@ -610,7 +699,7 @@ body.light .theme-toggle .icon-moon { display: none; }
 
       <!-- 批量导出预览（新功能占位） -->
       <div class="batch-bar">
-        <span class="label">已选 <b>4</b> 个图层</span>
+        <span class="label" id="batchLabel">已选 <b>1</b> 个切片</span>
         <button class="mini">命名模板</button>
         <button class="mini">全部 @2x</button>
         <button class="mini go">批量导出</button>
@@ -719,6 +808,140 @@ tree.addEventListener('click', (e) => {
   tree.querySelectorAll('.row.selected').forEach((r) => r.classList.remove('selected'))
   row.classList.add('selected')
 })
+
+// ========== 切图工具 ==========
+const toolbar = document.getElementById('toolbar')
+const artboard = document.querySelector('.artboard')
+const batchLabel = document.getElementById('batchLabel')
+let currentTool = 'slice'
+let sliceSeq = 5          // 预置切片 01-04
+let selectedSlices = new Set(['02'])
+
+function syncBatch() {
+  if (currentTool === 'slice') {
+    const n = selectedSlices.size
+    batchLabel.innerHTML = n > 0 ? `已选 <b>${n}</b> 个切片` : '未选择切片'
+  } else {
+    batchLabel.innerHTML = '已选 <b>1</b> 个图层'
+  }
+}
+
+function setTool(name) {
+  currentTool = name
+  toolbar.querySelectorAll('.tool[data-tool]').forEach((t) =>
+    t.classList.toggle('active', t.dataset.tool === name)
+  )
+  artboard.classList.toggle('slicing', name === 'slice')
+  syncBatch()
+}
+
+toolbar.addEventListener('click', (e) => {
+  const toggle = e.target.closest('#toggleSlices')
+  if (toggle) {
+    artboard.classList.toggle('slices-hidden')
+    toggle.classList.toggle('active')
+    return
+  }
+  const tool = e.target.closest('.tool[data-tool]')
+  if (tool) setTool(tool.dataset.tool)
+})
+
+// 键盘快捷键 V / C / I / H / Z
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return
+  const map = { v: 'move', c: 'slice', i: 'picker', h: 'hand', z: 'zoom' }
+  const name = map[e.key.toLowerCase()]
+  if (name) setTool(name)
+  if ((e.key === 'Delete' || e.key === 'Backspace') && currentTool === 'slice') {
+    selectedSlices.forEach((no) => {
+      const s = [...artboard.querySelectorAll('.slice')].find((el) => el.dataset.no === no)
+      if (s) s.remove()
+    })
+    selectedSlices.clear()
+    syncBatch()
+  }
+})
+
+// 拖拽画切片
+let draw = null
+artboard.addEventListener('mousedown', (e) => {
+  if (currentTool !== 'slice' || e.button !== 0) return
+  if (e.target.closest('.slice')) return
+  const rect = artboard.getBoundingClientRect()
+  const sx = e.clientX - rect.left
+  const sy = e.clientY - rect.top
+  draw = { sx, sy, el: null }
+  e.preventDefault()
+})
+document.addEventListener('mousemove', (e) => {
+  if (!draw) return
+  const rect = artboard.getBoundingClientRect()
+  const cx = Math.min(Math.max(e.clientX - rect.left, 0), rect.width)
+  const cy = Math.min(Math.max(e.clientY - rect.top, 0), rect.height)
+  const x = Math.min(draw.sx, cx), y = Math.min(draw.sy, cy)
+  const w = Math.abs(cx - draw.sx), h = Math.abs(cy - draw.sy)
+  if (!draw.el && (w > 6 || h > 6)) {
+    draw.el = document.createElement('div')
+    draw.el.className = 'slice-preview'
+    artboard.appendChild(draw.el)
+  }
+  if (draw.el) {
+    Object.assign(draw.el.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' })
+  }
+  draw.cur = { x, y, w, h }
+})
+document.addEventListener('mouseup', () => {
+  if (!draw) return
+  const { x, y, w, h } = draw.cur || { w: 0, h: 0 }
+  draw.el?.remove()
+  draw = null
+  if (w < 10 || h < 10) return
+  const no = String(sliceSeq++).padStart(2, '0')
+  const slice = document.createElement('div')
+  slice.className = 'slice selected'
+  slice.dataset.no = no
+  Object.assign(slice.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' })
+  slice.innerHTML = `<span class="no">${no}</span><span class="del">✕</span>`
+  artboard.querySelectorAll('.slice.selected').forEach((s) => {
+    s.classList.remove('selected')
+    selectedSlices.delete(s.dataset.no)
+  })
+  artboard.appendChild(slice)
+  selectedSlices.add(no)
+  syncBatch()
+})
+
+// 切片选择 / 删除
+artboard.addEventListener('click', (e) => {
+  if (currentTool !== 'slice') return
+  const del = e.target.closest('.del')
+  const slice = e.target.closest('.slice')
+  if (del && slice) {
+    slice.remove()
+    selectedSlices.delete(slice.dataset.no)
+    syncBatch()
+    return
+  }
+  if (!slice) {
+    artboard.querySelectorAll('.slice.selected').forEach((s) => s.classList.remove('selected'))
+    selectedSlices.clear()
+    syncBatch()
+    return
+  }
+  if (!e.ctrlKey && !e.metaKey) {
+    artboard.querySelectorAll('.slice.selected').forEach((s) => s.classList.remove('selected'))
+    selectedSlices.clear()
+  }
+  slice.classList.add('selected')
+  selectedSlices.add(slice.dataset.no)
+  syncBatch()
+})
+
+// 初始化预置切片的 dataset
+artboard.querySelectorAll('.slice').forEach((s, i) => {
+  if (!s.dataset.no) s.dataset.no = String(i + 1).padStart(2, '0')
+})
+syncBatch()
 </script>
 </body>
 </html>
