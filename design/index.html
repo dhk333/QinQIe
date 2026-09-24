@@ -125,6 +125,30 @@ body::before {
 }
 .btn-primary:hover { filter: brightness(1.12); transform: translateY(-1px); }
 .btn-primary:active { transform: scale(0.97); }
+.btn-danger { color: #fff; background: linear-gradient(135deg, #dc2626, #ef4444 60%, #f87171); box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3); }
+.btn-danger:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.btn-danger:active { transform: scale(0.97); }
+
+/* ========== Toast 轻提示 ========== */
+#toastWrap {
+  position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  z-index: 10001; pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-radius: 999px;
+  background: var(--overlay); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  font-size: 12.5px; color: var(--txt);
+  animation: toast-in 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.toast svg { width: 14px; height: 14px; flex-shrink: 0; }
+.toast-success svg { color: var(--green); }
+.toast-warning svg { color: var(--amber); }
+.toast-error svg { color: #ef4444; }
+.toast.out { opacity: 0; transform: translateY(-8px); transition: all 0.25s; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
 
 /* ========== 主体三栏 ========== */
 .main { display: flex; flex: 1; min-height: 0; }
@@ -1164,6 +1188,7 @@ const pctLabel = document.getElementById('pctLabel')
 const pctMenu = document.getElementById('pctMenu')
 pctLabel.addEventListener('click', (e) => {
   e.stopPropagation()
+  projMenu.classList.remove('open')
   pctMenu.classList.toggle('open')
 })
 pctMenu.addEventListener('click', (e) => {
@@ -1254,19 +1279,31 @@ function renderHome(filter = '') {
     </div>`).join('')
 }
 
-document.getElementById('projGrid').addEventListener('click', (e) => {
+document.getElementById('projGrid').addEventListener('click', async (e) => {
   const card = e.target.closest('.proj-card')
   if (!card) return
   const id = card.dataset.id
   const p = DATA.projects.find((x) => x.id === id)
   if (e.target.closest('.op-del')) {
+    const ok = await openDialog({
+      type: 'confirm',
+      title: `删除项目「${p.name}」`,
+      desc: p.psds.length ? `该项目包含 ${p.psds.length} 个 PSD 记录，删除后需要重新上传` : '确定要删除该项目吗？',
+      okText: '删除',
+      danger: true
+    })
+    if (!ok) return
     DATA.projects = DATA.projects.filter((x) => x.id !== id)
     renderHome(document.getElementById('homeSearch').value)
+    showToast(`已删除项目「${p.name}」`)
     return
   }
   if (e.target.closest('.op-rename')) {
-    const name = prompt('重命名项目', p.name)
-    if (name && name.trim()) { p.name = name.trim(); renderHome() }
+    const name = await openDialog({ type: 'prompt', title: '重命名项目', value: p.name })
+    if (!name || name === p.name) return
+    p.name = name
+    renderHome()
+    showToast('已重命名')
     return
   }
   location.hash = '#/project/' + id
@@ -1274,41 +1311,98 @@ document.getElementById('projGrid').addEventListener('click', (e) => {
 
 document.getElementById('homeSearch').addEventListener('input', (e) => renderHome(e.target.value))
 
+// ========== 通用弹窗与轻提示 ==========
+function showToast(msg, type = 'success') {
+  let wrap = document.getElementById('toastWrap')
+  if (!wrap) {
+    wrap = document.createElement('div')
+    wrap.id = 'toastWrap'
+    document.body.appendChild(wrap)
+  }
+  const icons = {
+    success: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.5"/></svg>',
+    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>'
+  }
+  const t = document.createElement('div')
+  t.className = `toast toast-${type}`
+  t.innerHTML = icons[type] + `<span>${msg}</span>`
+  wrap.appendChild(t)
+  setTimeout(() => {
+    t.classList.add('out')
+    setTimeout(() => t.remove(), 260)
+  }, 2500)
+}
+
+function openDialog({ type = 'confirm', title = '', desc = '', value = '', placeholder = '', okText = '确定', danger = false }) {
+  return new Promise((resolve) => {
+    const isPrompt = type === 'prompt'
+    const mask = document.createElement('div')
+    mask.className = 'modal-mask'
+    mask.innerHTML = `
+      <div class="modal">
+        <h3>${title}</h3>
+        ${desc ? `<p>${desc}</p>` : ''}
+        ${isPrompt ? `<input id="dlgInput" placeholder="${placeholder}" maxlength="30" />` : ''}
+        <div class="row2">
+          <button class="btn btn-ghost" id="dlgCancel">取消</button>
+          <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="dlgOk">${okText}</button>
+        </div>
+      </div>`
+    document.body.appendChild(mask)
+    const input = mask.querySelector('#dlgInput')
+    const ok = mask.querySelector('#dlgOk')
+    let done = false
+    const close = (val) => {
+      if (done) return
+      done = true
+      mask.remove()
+      document.removeEventListener('keydown', onKey)
+      resolve(val)
+    }
+    const submit = () => {
+      if (isPrompt) {
+        const v = input.value.trim()
+        if (!v) { input.focus(); return }
+        close(v)
+      } else close(true)
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') close(isPrompt ? null : false)
+      if (e.key === 'Enter' && document.activeElement === input) submit()
+    }
+    if (isPrompt) {
+      input.value = value
+      ok.disabled = !input.value.trim()
+      input.addEventListener('input', () => { ok.disabled = !input.value.trim() })
+      input.addEventListener('keydown', onKey)
+      setTimeout(() => { input.focus(); input.select() }, 0)
+    } else {
+      document.addEventListener('keydown', onKey)
+      setTimeout(() => ok.focus(), 0)
+    }
+    mask.addEventListener('mousedown', (e) => { if (e.target === mask) close(isPrompt ? null : false) })
+    mask.querySelector('#dlgCancel').addEventListener('click', () => close(isPrompt ? null : false))
+    ok.addEventListener('click', submit)
+  })
+}
+
 // 新建项目弹窗
 document.getElementById('btnNewProject').addEventListener('click', openProjectModal)
 
-function openProjectModal() {
-  const mask = document.createElement('div')
-  mask.className = 'modal-mask'
-  mask.innerHTML = `
-    <div class="modal">
-      <h3>新建项目</h3>
-      <p>项目用于归类同一批设计稿，PSD 文件只记录路径、不会被移动</p>
-      <input id="modalInput" placeholder="项目名称，例如：沃尔核材官网" maxlength="30" />
-      <div class="row2">
-        <button class="btn btn-ghost" id="modalCancel">取消</button>
-        <button class="btn btn-primary" id="modalOk">创建</button>
-      </div>
-    </div>`
-  document.body.appendChild(mask)
-  const input = mask.querySelector('#modalInput')
-  input.focus()
-  const close = () => mask.remove()
-  const create = () => {
-    const name = input.value.trim()
-    if (!name) { input.focus(); return }
-    DATA.projects.unshift({ id: 'p' + Date.now(), name, psds: [] })
-    close()
-    renderHome()
-    location.hash = '#/project/' + DATA.projects[0].id
-  }
-  mask.addEventListener('click', (e) => { if (e.target === mask) close() })
-  mask.querySelector('#modalCancel').addEventListener('click', close)
-  mask.querySelector('#modalOk').addEventListener('click', create)
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') create()
-    if (e.key === 'Escape') close()
+async function openProjectModal() {
+  const name = await openDialog({
+    type: 'prompt',
+    title: '新建项目',
+    desc: '项目用于归类同一批设计稿，PSD 文件只记录路径、不会被移动',
+    placeholder: '项目名称，例如：沃尔核材官网',
+    okText: '创建'
   })
+  if (!name) return
+  DATA.projects.unshift({ id: 'p' + Date.now(), name, groups: [], psds: [] })
+  renderHome()
+  showToast(`已创建项目「${name}」`)
+  location.hash = '#/project/' + DATA.projects[0].id
 }
 
 // 项目列表页
@@ -1393,21 +1487,31 @@ function thumbHTML(psd, h) {
       <span class="ops"><span class="op-rename" title="重命名">✎</span><span class="op-del" title="删除此 PSD">✕</span></span>
     </div>`}
 
-document.getElementById('artFlow').addEventListener('click', (e) => {
+document.getElementById('artFlow').addEventListener('click', async (e) => {
   const card = e.target.closest('.art-card')
   if (!card || card.classList.contains('loading')) return
   const idx = +card.dataset.idx
   const psd = currentProject.psds[idx]
   if (e.target.closest('.op-rename')) {
-    const name = prompt('重命名 PSD', psd.name)
-    if (name && name.trim()) { psd.name = name.trim(); renderProject() }
+    const name = await openDialog({ type: 'prompt', title: '重命名 PSD', value: psd.name })
+    if (!name || name === psd.name) return
+    psd.name = name
+    renderProject()
+    showToast('已重命名')
     return
   }
   if (e.target.closest('.op-del')) {
-    if (confirm(`确定删除「${psd.name}」？\n（只从项目中移除记录，不会删除本地文件）`)) {
-      currentProject.psds.splice(idx, 1)
-      renderProject()
-    }
+    const ok = await openDialog({
+      type: 'confirm',
+      title: `删除「${psd.name}」`,
+      desc: '只从项目中移除记录，不会删除本地文件',
+      okText: '删除',
+      danger: true
+    })
+    if (!ok) return
+    currentProject.psds.splice(idx, 1)
+    renderProject()
+    showToast(`已删除「${psd.name}」`)
     return
   }
   location.hash = '#/detail'
@@ -1425,15 +1529,19 @@ function artFlowDragInit() {
 
 // 分组面板：点击切换 / 新建 / 重命名 / 删除分组 / 拖拽归类
 const groupPanel = document.getElementById('groupPanel')
-groupPanel.addEventListener('click', (e) => {
+groupPanel.addEventListener('click', async (e) => {
   if (!currentProject) return
   if (e.target.closest('#grpAdd')) {
-    const name = prompt('新建分组')
-    if (name && name.trim()) {
-      currentProject.groups.push({ id: 'g' + Date.now(), name: name.trim() })
-      selectedGroup = currentProject.groups[currentProject.groups.length - 1].id
-      renderProject()
+    const name = await openDialog({ type: 'prompt', title: '新建分组', placeholder: '分组名称' })
+    if (!name) return
+    if (currentProject.groups.some((x) => x.name === name)) {
+      showToast('分组名称已存在', 'warning')
+      return
     }
+    currentProject.groups.push({ id: 'g' + Date.now(), name })
+    selectedGroup = currentProject.groups[currentProject.groups.length - 1].id
+    renderProject()
+    showToast(`已创建分组「${name}」`)
     return
   }
   const grp = e.target.closest('.grp')
@@ -1441,18 +1549,33 @@ groupPanel.addEventListener('click', (e) => {
   const g = grp.dataset.g
   if (e.target.closest('.g-op-rename')) {
     const target = currentProject.groups.find((x) => x.id === g)
-    const name = prompt('重命名分组', target.name)
-    if (name && name.trim()) { target.name = name.trim(); renderProject() }
+    const name = await openDialog({ type: 'prompt', title: '重命名分组', value: target.name })
+    if (!name || name === target.name) return
+    if (currentProject.groups.some((x) => x.name === name && x.id !== g)) {
+      showToast('分组名称已存在', 'warning')
+      return
+    }
+    target.name = name
+    renderProject()
+    showToast('已重命名')
     return
   }
   if (e.target.closest('.g-op-del')) {
     const target = currentProject.groups.find((x) => x.id === g)
-    if (confirm(`删除分组「${target.name}」？\n分组内的画板将移入「未分组」`)) {
-      currentProject.psds.forEach((p) => { if (p.groupId === g) p.groupId = null })
-      currentProject.groups = currentProject.groups.filter((x) => x.id !== g)
-      if (selectedGroup === g) selectedGroup = 'all'
-      renderProject()
-    }
+    const cnt = currentProject.psds.filter((p) => p.groupId === g).length
+    const ok = await openDialog({
+      type: 'confirm',
+      title: `删除分组「${target.name}」`,
+      desc: cnt ? `分组内的 ${cnt} 个画板将移入「未分组」` : '该分组为空，确定删除吗？',
+      okText: '删除',
+      danger: true
+    })
+    if (!ok) return
+    currentProject.psds.forEach((p) => { if (p.groupId === g) p.groupId = null })
+    currentProject.groups = currentProject.groups.filter((x) => x.id !== g)
+    if (selectedGroup === g) selectedGroup = 'all'
+    renderProject()
+    showToast(`已删除分组「${target.name}」`)
     return
   }
   selectedGroup = g
@@ -1495,7 +1618,12 @@ document.getElementById('btnUploadPsd').addEventListener('click', () => {
   }
   currentProject.psds.push(psd)
   renderProject()
-  setTimeout(() => { psd.loading = false; renderProject() }, 900)
+  showToast(`正在解析「${psd.name}」…`, 'warning')
+  setTimeout(() => {
+    psd.loading = false
+    renderProject()
+    showToast(`已添加「${psd.name}」`)
+  }, 900)
 })
 
 document.getElementById('btnBackGlobal').addEventListener('click', () => {
@@ -1509,6 +1637,7 @@ const projTitle = document.getElementById('projTitle')
 const projMenu = document.getElementById('projMenu')
 projTitle.addEventListener('click', (e) => {
   e.stopPropagation()
+  pctMenu.classList.remove('open')
   projMenu.classList.toggle('open')
 })
 projMenu.addEventListener('click', (e) => {
