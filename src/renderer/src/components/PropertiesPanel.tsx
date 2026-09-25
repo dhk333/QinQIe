@@ -169,7 +169,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
               <CopyIcon className="h-3.5 w-3.5" />
             )}
           </button>
-          <pre className="overflow-x-auto p-3 pr-9 font-mono text-[11px] leading-5 text-txt-2">
+          <pre className="code-block overflow-x-auto p-3 pr-9 font-mono text-[11px] leading-5 text-txt-2">
             {css}
           </pre>
         </div>

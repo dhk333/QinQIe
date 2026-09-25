@@ -6,15 +6,16 @@ import { useHashRoute, navigate } from '@/lib/router'
 import HomePage from '@/pages/HomePage'
 import ProjectPage from '@/pages/ProjectPage'
 import DetailPage from '@/pages/DetailPage'
-import { BackIcon, CaretDownIcon, MoonIcon, PlusIcon, SunIcon, UploadIcon } from '@/components/icons'
+import ChangelogPage from '@/pages/ChangelogPage'
+import { BackIcon, CaretDownIcon, HistoryIcon, MoonIcon, PlusIcon, SunIcon, UploadIcon } from '@/components/icons'
 
 export default function App() {
   const hash = useHashRoute()
   const [projects, setProjects] = useState<Project[] | null>(null)
-  const [detail, setDetail] = useState<{ projectId: string; psdId: string } | null>(null)
   const [dark, setDark] = useState(false)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [changelogFrom, setChangelogFrom] = useState('#/home')
   const dialog = useDialog()
   const toast = useToast()
   const uploadRef = useRef<(() => void) | null>(null)
@@ -48,17 +49,23 @@ export default function App() {
 
   const route = hash.startsWith('#/project/')
     ? ({ name: 'project', id: hash.slice(10) } as const)
-    : hash.startsWith('#/detail')
-      ? ({ name: 'detail' } as const)
-      : ({ name: 'home' } as const)
+    : hash.startsWith('#/detail/')
+      ? (() => {
+          const [projectId, psdId] = hash.slice(9).split('/')
+          return { name: 'detail', id: projectId, psdId } as const
+        })()
+      : hash === '#/changelog'
+        ? ({ name: 'changelog' } as const)
+        : ({ name: 'home' } as const)
 
   const currentProject =
-    route.name !== 'home' && projects
-      ? projects.find((p) => p.id === (route as { id?: string }).id) ??
-        (route.name === 'detail' ? projects.find((p) => p.id === detail?.projectId) ?? null : null)
+    (route.name === 'project' || route.name === 'detail') && projects
+      ? projects.find((p) => p.id === route.id) ?? null
       : null
   const detailPsd =
-    currentProject?.psds.find((s) => s.id === detail?.psdId) ?? null
+    route.name === 'detail' && currentProject
+      ? currentProject.psds.find((s) => s.id === route.psdId) ?? null
+      : null
 
   const handleCreateProject = async () => {
     const name = await dialog({
@@ -80,6 +87,11 @@ export default function App() {
     uploadRef.current()
   }
 
+  const openChangelog = () => {
+    setChangelogFrom(hash === '#/changelog' ? '#/home' : hash)
+    navigate('#/changelog')
+  }
+
   const loading = projects === null
 
   return (
@@ -91,7 +103,8 @@ export default function App() {
               className="back-btn"
               title="返回"
               onClick={() => {
-                if (route.name === 'detail' && currentProject) navigate(`#/project/${currentProject.id}`)
+                if (route.name === 'changelog') navigate(changelogFrom)
+                else if (route.name === 'detail' && currentProject) navigate(`#/project/${currentProject.id}`)
                 else navigate('#/home')
               }}
             >
@@ -99,7 +112,7 @@ export default function App() {
             </span>
           )}
           <div className="logo">
-            <svg viewBox="100 24 168 214" width="13" height="17" fill="none">
+            <svg viewBox="100 24 168 214" width="19" height="25" fill="none">
               <path d="M156.6,181v50.3c0,6.4-7,10.3-12.4,7l-33.3-20c-5.3-3.2-8.5-8.9-8.5-15.1V98c0-6.4,7-10.3,12.5-7l41.6,25.4L116,156.8L156.6,181z" fill="#2945be" />
               <path d="M178.6,116.2h-22V65.7c0-6.4,7-10.3,12.5-7l41.8,25.6L178.6,116.2z" fill="#4b6be4" />
               <path d="M188.8,148.5h22v50.6c0,6.4-7,10.3-12.4,7L156.6,181L188.8,148.5z" fill="#4b6be4" />
@@ -107,10 +120,7 @@ export default function App() {
             </svg>
           </div>
           <span className="name">轻切</span>
-          <span className="ver">v0.2</span>
         </div>
-
-        {route.name === 'home' && <span className="page-title">我的项目</span>}
 
         {route.name === 'project' && currentProject && (
           <span className="pname-wrap" style={{ position: 'relative' }}>
@@ -150,7 +160,6 @@ export default function App() {
 
         {route.name === 'detail' && detailPsd && currentProject && (
           <div className="file-chip">
-            <span className="dot" />
             <span className="crumb"><b>{currentProject.name}</b> /</span>
             <span className="path">{detailPsd.name}.psd</span>
             {detailPsd.w > 0 && (
@@ -165,13 +174,7 @@ export default function App() {
 
         {route.name === 'home' && (
           <>
-            <div
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8, width: 220,
-                background: 'var(--panel-2)', border: '1px solid var(--line)',
-                borderRadius: 999, padding: '7px 12px'
-              }}
-            >
+            <div className="tb-search">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" style={{ width: 13, height: 13, color: 'var(--txt-3)' }}>
                 <circle cx="11" cy="11" r="7" />
                 <path d="M20 20l-3.5-3.5" />
@@ -180,7 +183,6 @@ export default function App() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="搜索项目…"
-                style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--txt)', fontSize: 12 }}
               />
             </div>
             <button className="btn btn-primary" onClick={handleCreateProject}>
@@ -191,9 +193,16 @@ export default function App() {
         )}
 
         {route.name === 'project' && currentProject && (
-          <button className="btn btn-primary" style={{ padding: '7px 16px' }} onClick={handleUpload}>
+          <button className="btn btn-primary" onClick={handleUpload}>
             <UploadIcon />
             上传 PSD
+          </button>
+        )}
+
+        {route.name !== 'changelog' && (
+          <button className="btn btn-secondary" title="查看版本更新记录" onClick={openChangelog}>
+            <HistoryIcon />
+            更新记录
           </button>
         )}
 
@@ -241,10 +250,7 @@ export default function App() {
             <ProjectPage
               project={currentProject}
               onUpdate={(mutate) => updateProject(currentProject.id, mutate)}
-              onOpenPsd={(psd) => {
-                setDetail({ projectId: currentProject.id, psdId: psd.id })
-                navigate('#/detail')
-              }}
+              onOpenPsd={(psd) => navigate(`#/detail/${currentProject.id}/${psd.id}`)}
               registerUpload={(fn) => {
                 uploadRef.current = fn
               }}
@@ -253,6 +259,7 @@ export default function App() {
           {route.name === 'detail' && currentProject && detailPsd && (
             <DetailPage project={currentProject} psd={detailPsd} onBack={() => navigate(`#/project/${currentProject.id}`)} />
           )}
+          {route.name === 'changelog' && <ChangelogPage />}
           {route.name === 'project' && !currentProject && (
             <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--txt-3)' }}>项目不存在</div>
           )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DocSlice, ExportFormat, Project, ProjectPsd } from '@/types'
 import {
   parsePsd,
@@ -56,8 +56,8 @@ export default function DetailPage({ project, psd, onBack }: Props) {
   // 面板拖拽
   const leftRef = useRef<HTMLElement>(null)
   const rightRef = useRef<HTMLElement>(null)
-  const [leftCollapsed, setLeftCollapsed] = useState(true)
-  const [rightCollapsed, setRightCollapsed] = useState(true)
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [rightCollapsed, setRightCollapsed] = useState(false)
   const dragRef = useRef<{ el: HTMLElement; x: number; w: number; dir: 1 | -1 } | null>(null)
 
   useEffect(() => {
@@ -110,8 +110,6 @@ export default function DetailPage({ project, psd, onBack }: Props) {
   useEffect(() => {
     let alive = true
     setLoading(true)
-    setLeftCollapsed(true)
-    setRightCollapsed(true)
     window.api
       .readPsdByPath(psd.path)
       .then(async ({ name, buffer }) => {
@@ -134,11 +132,6 @@ export default function DetailPage({ project, psd, onBack }: Props) {
         setSlices([])
         setSelectedSliceIds(new Set())
         setLoading(false)
-        // 解析完成后展开左右面板（清掉可能残留的拖拽内联宽度）
-        if (leftRef.current) leftRef.current.style.width = ''
-        if (rightRef.current) rightRef.current.style.width = ''
-        setLeftCollapsed(false)
-        setRightCollapsed(false)
         // 结构阶段跳过了全部位图（canvasMap 为空）时，第二遍全量解码补上
         if (parsed.canvasMap.size === 0) {
           setDecoding(true)
@@ -238,9 +231,12 @@ export default function DetailPage({ project, psd, onBack }: Props) {
     [tree]
   )
 
-  const visibleLayerCount = tree.reduce(
-    (acc, n) => acc + (n.type === 'layer' && !n.hidden && !hiddenIds.has(n.id) ? 1 : 0),
-    0
+  // 图层树是多层结构，统计必须递归，只数 tree.length 会漏掉组内图层
+  const layerCount = useMemo(() => flattenLayers(tree).length, [tree])
+
+  const visibleLayerCount = useMemo(
+    () => flattenLayers(tree).filter((n) => n.type === 'layer' && !n.hidden && !hiddenIds.has(n.id)).length,
+    [tree, hiddenIds]
   )
 
   const exportAll = useCallback(
@@ -387,7 +383,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
       <aside ref={leftRef} className={`panel panel-left${leftCollapsed ? ' collapsed' : ''}`}>
         <div className="panel-head">
           <span className="label">图 层</span>
-          <span className="count">{tree.length}</span>
+          <span className="count">{layerCount}</span>
         </div>
         <LayerTree
           tree={tree}
@@ -571,7 +567,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
           </span>
         </div>
 
-        {loading && (
+        {(loading || decoding) && (
           <div
             style={{
               position: 'absolute', inset: 0, zIndex: 30,
@@ -580,7 +576,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
               background: 'rgba(10,10,12,0.55)', backdropFilter: 'blur(4px)'
             }}
           >
-            <svg className="logo-draw" viewBox="0 0 352 381" width="42" height="46" fill="none" style={{ color: '#fff' }}>
+            <svg className="logo-draw" viewBox="0 0 352 381" width="63" height="69" fill="none" style={{ color: '#fff' }}>
               <path
                 pathLength={1}
                 d="M156.6,181v50.3c0,6.4-7,10.3-12.4,7l-33.3-20c-5.3-3.2-8.5-8.9-8.5-15.1V98c0-6.4,7-10.3,12.5-7l41.6,25.4L116,156.8L156.6,181z"
@@ -593,28 +589,6 @@ export default function DetailPage({ project, psd, onBack }: Props) {
               />
             </svg>
             <span style={{ fontSize: 12, color: '#fff' }}>正在解析 PSD…</span>
-          </div>
-        )}
-
-        {decoding && (
-          <div
-            style={{
-              position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)',
-              zIndex: 30, display: 'flex', alignItems: 'center', gap: 8,
-              padding: '6px 14px', borderRadius: 999,
-              background: 'var(--panel)', border: '1px solid var(--line)',
-              fontSize: 12, color: 'var(--txt-2)',
-              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.05)'
-            }}
-          >
-            <span
-              style={{
-                width: 12, height: 12, borderRadius: '50%',
-                border: '2px solid var(--line)', borderTopColor: 'var(--accent)',
-                animation: 'spin 0.8s linear infinite'
-              }}
-            />
-            正在解码图层…
           </div>
         )}
       </div>

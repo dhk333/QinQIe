@@ -185,6 +185,16 @@ export function SunIcon({ className }: IconProps) {
   )
 }
 
+export function HistoryIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <path d="M3.5 12a8.5 8.5 0 1 0 2.7-6.2L3.5 8.3" />
+      <path d="M3.2 4.2v4.4h4.4" />
+      <path d="M12 7.5V12l3.2 1.9" />
+    </svg>
+  )
+}
+
 export function CaretDownIcon({ className }: IconProps) {
   return (
     <svg className={className} {...svgProps} strokeWidth={2}>
