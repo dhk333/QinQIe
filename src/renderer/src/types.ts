@@ -45,6 +45,8 @@ export interface ProjectPsd {
   groupId: string | null
   thumbPath?: string
   missing?: boolean
+  /** 手工切片，随项目持久化 */
+  slices?: DocSlice[]
 }
 
 export interface Project {
@@ -66,4 +68,9 @@ export interface DocSlice {
   y: number
   w: number
   h: number
+  /** 自定义名，导出文件名优先用它；空则「切片+序号」 */
+  name?: string
+  /** 覆盖批量导出的格式/倍数；未设则跟随面板参数 */
+  format?: ExportFormat
+  scale?: number
 }

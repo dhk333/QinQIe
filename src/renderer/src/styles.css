@@ -514,6 +514,13 @@ body.dark .theme-toggle .icon-moon { display: none; }
   font-family: Consolas, monospace;
 }
 .slice-editor input:focus { border-color: var(--accent); }
+.slice-editor .slice-name { width: 84px; }
+.slice-editor select {
+  padding: 3px 4px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 5px; color: var(--txt-2); font-size: 10px; outline: none;
+  font-family: inherit; cursor: pointer;
+}
+.slice-editor select:focus { border-color: var(--accent); }
 .logo-draw path {
   fill: none; stroke: currentColor; stroke-width: 7; stroke-miterlimit: 10;
   stroke-dasharray: 1; stroke-dashoffset: 1;
@@ -539,6 +546,72 @@ body.dark .theme-toggle .icon-moon { display: none; }
 }
 .layer-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .layer-preview span { font-size: 11px; color: var(--txt-3); }
+
+/* ========== 批量导出面板 ========== */
+.export-pop {
+  position: absolute; top: 68px; left: 50%; z-index: 8;
+  transform: translateX(-50%) translateY(6px) scale(0.97);
+  width: 264px; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--overlay); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2); border-radius: 14px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.12);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 0.16s var(--ease), transform 0.16s var(--ease), visibility 0.16s;
+}
+.export-pop.open {
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+.ep-group { display: flex; align-items: center; gap: 10px; }
+.ep-label { width: 28px; flex-shrink: 0; font-size: 11px; color: var(--txt-3); }
+.ep-opts { display: flex; gap: 6px; flex: 1; }
+.ep-opts button {
+  flex: 1; cursor: pointer; border-radius: 7px; padding: 5px 0; font-size: 11px;
+  background: var(--panel-2); color: var(--txt-2); border: 1px solid var(--line);
+  transition: all 0.13s; font-family: inherit;
+}
+.ep-opts button:hover { border-color: var(--line-2); color: var(--txt); }
+.ep-opts button.on { border-color: var(--accent); background: var(--accent-dim); color: var(--txt); }
+.ep-group input[type="range"] { flex: 1; accent-color: var(--accent); }
+.ep-q { width: 34px; text-align: right; font-family: Consolas, monospace; font-size: 11px; color: var(--txt-2); }
+.ep-go { width: 100%; margin-top: 2px; }
+.batch-bar .batch-mini.go.active { filter: brightness(1.12); box-shadow: 0 0 0 2px var(--accent-dim); }
+
+/* ========== 导出进度 ========== */
+.export-mask {
+  position: absolute; inset: 0; z-index: 20; display: grid; place-items: center;
+  background: rgba(10, 10, 12, 0.35); backdrop-filter: blur(3px);
+}
+.export-progress {
+  width: 260px; padding: 18px; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--line-2);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.4); animation: rise 0.2s var(--ease);
+}
+.export-progress p { margin: 0 0 12px; text-align: center; font-size: 12px; color: var(--txt-2); }
+.export-progress p b { color: var(--txt); font-family: Consolas, monospace; }
+.ep-bar {
+  height: 4px; margin-bottom: 14px; border-radius: 999px;
+  background: var(--panel-3); overflow: hidden;
+}
+.ep-bar i { display: block; height: 100%; background: var(--accent-grad); border-radius: 999px; transition: width 0.15s linear; }
+.export-progress .row2 { display: flex; justify-content: center; }
+
+/* ========== 右键菜单 ========== */
+.ctx-menu {
+  position: fixed; z-index: 100; min-width: 168px; padding: 5px;
+  background: var(--overlay); backdrop-filter: blur(12px);
+  border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.28);
+  animation: rise 0.12s var(--ease);
+}
+.ctx-item {
+  padding: 7px 10px; border-radius: 6px; font-size: 12px; color: var(--txt-2);
+  cursor: default; transition: background 0.1s, color 0.1s;
+}
+.ctx-item:hover { background: var(--accent-dim); color: var(--txt); }
+.ctx-item.danger:hover { background: rgba(239, 68, 68, 0.14); color: #f87171; }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 
 .text-box {
   position: relative; background: var(--panel-2); border: 1px solid var(--line);

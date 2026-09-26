@@ -257,7 +257,17 @@ export default function App() {
             />
           )}
           {route.name === 'detail' && currentProject && detailPsd && (
-            <DetailPage project={currentProject} psd={detailPsd} onBack={() => navigate(`#/project/${currentProject.id}`)} />
+            <DetailPage
+              project={currentProject}
+              psd={detailPsd}
+              onUpdatePsd={(mutate) =>
+                updateProject(currentProject.id, (p) => {
+                  const s = p.psds.find((x) => x.id === detailPsd.id)
+                  if (s) mutate(s)
+                })
+              }
+              onBack={() => navigate(`#/project/${currentProject.id}`)}
+            />
           )}
           {route.name === 'changelog' && <ChangelogPage />}
           {route.name === 'project' && !currentProject && (

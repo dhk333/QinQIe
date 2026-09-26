@@ -17,12 +17,12 @@ const api = {
   readDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke('file:read-dataurl', p),
   pathsForFiles: (files: File[]): string[] =>
     files.map((f) => webUtils.getPathForFile(f)).filter((p): p is string => !!p),
-  // 导出
-  saveImage: (defaultName: string, format: string, dataUrl: string): Promise<boolean> =>
-    ipcRenderer.invoke('image:save', defaultName, format, dataUrl),
+  // 导出（bytes 为渲染层编码好的图片字节，结构化克隆直传）
+  saveImage: (defaultName: string, format: string, bytes: Uint8Array): Promise<boolean> =>
+    ipcRenderer.invoke('image:save', defaultName, format, bytes),
   pickDir: (): Promise<string | null> => ipcRenderer.invoke('dir:pick'),
-  saveBatchImages: (files: { name: string; dataUrl: string }[]): Promise<{ saved: number } | null> =>
-    ipcRenderer.invoke('images:save-batch', files)
+  writeExportFile: (dir: string, name: string, bytes: Uint8Array): Promise<boolean> =>
+    ipcRenderer.invoke('file:write-bytes', dir, name, bytes)
 }
 
 contextBridge.exposeInMainWorld('api', api)

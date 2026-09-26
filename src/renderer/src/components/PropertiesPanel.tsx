@@ -11,7 +11,7 @@ interface Props {
   rnodes: RNode[]
   canvasMap: Map<number, HTMLCanvasElement>
   hiddenIds: Set<number>
-  onExport: (format: ExportFormat, scale: number) => void
+  onExport: (format: ExportFormat, scale: number, quality?: number) => void
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -37,6 +37,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenIds, onExport }: Props) {
   const [format, setFormat] = useState<ExportFormat>('png')
   const [scale, setScale] = useState(2)
+  const [quality, setQuality] = useState(0.92)
   const [copied, setCopied] = useState<'css' | 'color' | 'text' | null>(null)
 
   const color = useMemo(
@@ -219,7 +220,26 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
             </button>
           ))}
         </div>
-        <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => onExport(format, scale)}>
+        {format !== 'png' && (
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-[11px] text-txt-3">质量</span>
+            <input
+              type="range"
+              min={0.5}
+              max={1}
+              step={0.01}
+              value={quality}
+              onChange={(e) => setQuality(Number(e.target.value))}
+              style={{ flex: 1, accentColor: 'var(--accent)' }}
+            />
+            <b className="font-mono text-[11px] text-txt-2">{Math.round(quality * 100)}%</b>
+          </div>
+        )}
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%' }}
+          onClick={() => onExport(format, scale, format === 'png' ? undefined : quality)}
+        >
           导出所选图层
         </button>
       </Section>

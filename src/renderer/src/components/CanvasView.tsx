@@ -17,8 +17,9 @@ interface Props {
   rnodes: RNode[]
   canvasMap: Map<number, HTMLCanvasElement>
   hiddenIds: Set<number>
-  selectedId: number | null
-  onSelect: (layer: PsdLayer | null) => void
+  selectedIds: Set<number>
+  onSelect: (layer: PsdLayer | null, mods: { ctrl: boolean; shift: boolean }) => void
+  onLayerContext?: (layer: PsdLayer, x: number, y: number) => void
   apiRef?: React.MutableRefObject<CanvasViewApi | null>
   onZoomChange?: (pct: number) => void
   tool: CanvasTool
@@ -130,8 +131,9 @@ export default function CanvasView({
   rnodes,
   canvasMap,
   hiddenIds,
-  selectedId,
+  selectedIds,
   onSelect,
+  onLayerContext,
   apiRef,
   onZoomChange,
   tool,
@@ -230,10 +232,10 @@ export default function CanvasView({
     const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#4c7bf3'
     const accent2 = getComputedStyle(document.body).getPropertyValue('--accent-2').trim() || accent
 
-    // 图层选中
-    if (selectedId != null) {
-      const layer = flattenLayers(tree).find((l) => l.id === selectedId)
-      if (layer) {
+    // 图层选中（支持多选）
+    if (selectedIds.size > 0) {
+      for (const layer of flattenLayers(tree)) {
+        if (!selectedIds.has(layer.id)) continue
         const x = offset.x + layer.left * zoom
         const y = offset.y + layer.top * zoom
         const w = layer.width * zoom
@@ -278,7 +280,7 @@ export default function CanvasView({
         ctx.strokeStyle = accent
         ctx.lineWidth = selected ? 1.5 : 1
         ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1)
-        const label = s.no
+        const label = s.name?.trim() ? `${s.no}·${s.name.trim()}` : s.no
         ctx.font = '10px Consolas, monospace'
         const tw = ctx.measureText(label).width + 10
         ctx.fillStyle = accent
@@ -322,7 +324,7 @@ export default function CanvasView({
         ctx.setLineDash([])
       }
     }
-  }, [doc, tree, rnodes, canvasMap, hiddenIds, selectedId, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect])
+  }, [doc, tree, rnodes, canvasMap, hiddenIds, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect])
 
   // 滚轮缩放
   useEffect(() => {
@@ -554,8 +556,9 @@ export default function CanvasView({
       return
     }
     if (d.mode === 'pan' && !d.moved) {
+      const mods = { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey }
       if (tool === 'move') {
-        onSelect(hitLayer(mx, my))
+        onSelect(hitLayer(mx, my), mods)
       } else if (tool === 'picker') {
         const hex = pickColor(mx, my)
         if (hex) onPickColor(hex)
@@ -566,6 +569,14 @@ export default function CanvasView({
   }
 
   const cursor = tool === 'slice' ? 'crosshair' : tool === 'hand' ? 'grab' : 'default'
+
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    if (tool !== 'move' || !onLayerContext || !containerRef.current) return
+    const rect = containerRef.current.getBoundingClientRect()
+    const hit = hitLayer(e.clientX - rect.left, e.clientY - rect.top)
+    if (hit) onLayerContext(hit, e.clientX, e.clientY)
+  }
 
   if (!doc) {
     return (
@@ -590,6 +601,7 @@ export default function CanvasView({
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
+      onContextMenu={onContextMenu}
       style={{ cursor }}
     >
       <canvas ref={canvasRef} className="absolute inset-0" />

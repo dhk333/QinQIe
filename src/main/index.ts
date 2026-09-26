@@ -218,7 +218,7 @@ ipcMain.handle('psd:import', async (_e, paths: string[]): Promise<ImportResult[]
   return results
 })
 
-// ========== 批量导出 ==========
+// ========== 导出保存 ==========
 ipcMain.handle('dir:pick', async (): Promise<string | null> => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: '选择导出目录',
@@ -227,52 +227,36 @@ ipcMain.handle('dir:pick', async (): Promise<string | null> => {
   return canceled || !filePaths[0] ? null : filePaths[0]
 })
 
-ipcMain.handle(
-  'images:save-batch',
-  async (_e, files: { name: string; dataUrl: string }[]): Promise<{ saved: number } | null> => {
-    const dir = await dialog.showOpenDialog({
-      title: '选择导出目录',
-      properties: ['openDirectory', 'createDirectory']
-    })
-    if (dir.canceled || !dir.filePaths[0]) return null
-    const outDir = dir.filePaths[0]
-    const used = new Set<string>()
-    let saved = 0
-    for (const f of files) {
-      let name = f.name
-      let i = 2
-      while (used.has(name.toLowerCase())) {
-        name = f.name.replace(/(\.[^.]+)$/, `（${i}）$1`)
-        i++
-      }
-      used.add(name.toLowerCase())
-      const base64 = f.dataUrl.slice(f.dataUrl.indexOf(',') + 1)
-      await writeFile(join(outDir, name), Buffer.from(base64, 'base64'))
-      saved++
-    }
-    return { saved }
-  }
-)
-
-// ========== 导出保存 ==========
 const FORMAT_FILTERS: Record<string, { name: string; extensions: string[] }> = {
   png: { name: 'PNG 图片', extensions: ['png'] },
   jpeg: { name: 'JPEG 图片', extensions: ['jpg'] },
   webp: { name: 'WebP 图片', extensions: ['webp'] }
 }
 
+// 字节直写：渲染层已完成编码，主进程只落盘，省掉 base64 编解码开销
 ipcMain.handle(
   'image:save',
-  async (_e, defaultName: string, format: string, dataUrl: string): Promise<boolean> => {
-    const ext = format === 'jpeg' ? 'jpg' : format
+  async (_e, defaultName: string, format: string, bytes: Uint8Array): Promise<boolean> => {
     const { canceled, filePath } = await dialog.showSaveDialog({
       title: '导出图片',
       defaultPath: defaultName,
       filters: [FORMAT_FILTERS[format] ?? FORMAT_FILTERS.png]
     })
     if (canceled || !filePath) return false
-    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
-    await writeFile(filePath, Buffer.from(base64, 'base64'))
+    await writeFile(filePath, bytes)
     return true
+  }
+)
+
+ipcMain.handle(
+  'file:write-bytes',
+  async (_e, dir: string, name: string, bytes: Uint8Array): Promise<boolean> => {
+    try {
+      // basename 兜底：目录来自系统选择器，文件名只允许最终一段
+      await writeFile(join(dir, basename(name)), bytes)
+      return true
+    } catch {
+      return false
+    }
   }
 )

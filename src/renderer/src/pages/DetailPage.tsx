@@ -8,10 +8,11 @@ import {
   buildCompositeCanvas,
   renderLayerCanvas
 } from '@/lib/psd'
-import { layerToDataUrl } from '@/lib/export'
+import { exportCanvasBytes } from '@/lib/export'
 import { useDialog, useToast } from '@/lib/ui'
 import LayerTree from '@/components/LayerTree'
 import CanvasView, { type CanvasTool, type CanvasViewApi } from '@/components/CanvasView'
+import ContextMenu from '@/components/ContextMenu'
 import PropertiesPanel from '@/components/PropertiesPanel'
 import {
   EyeIcon,
@@ -29,10 +30,20 @@ import type { RNode } from '@/lib/compositor'
 interface Props {
   project: Project
   psd: ProjectPsd
+  onUpdatePsd: (mutate: (psd: ProjectPsd) => void) => void
   onBack: () => void
 }
 
-export default function DetailPage({ project, psd, onBack }: Props) {
+function findInTree(nodes: PsdLayer[], id: number): PsdLayer | null {
+  for (const n of nodes) {
+    if (n.id === id) return n
+    const hit = n.children ? findInTree(n.children, id) : null
+    if (hit) return hit
+  }
+  return null
+}
+
+export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props) {
   const [doc, setDoc] = useState<PsdDoc | null>(null)
   const [tree, setTree] = useState<PsdLayer[]>([])
   const [decoding, setDecoding] = useState(false)
@@ -40,18 +51,80 @@ export default function DetailPage({ project, psd, onBack }: Props) {
   const canvasMapRef = useRef<Map<number, HTMLCanvasElement>>(new Map())
   const [hiddenIds, setHiddenIds] = useState<Set<number>>(new Set())
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const anchorRef = useRef<number | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; ids: number[] } | null>(null)
   const [loading, setLoading] = useState(true)
   const canvasApiRef = useRef<CanvasViewApi | null>(null)
   const [zoomPct, setZoomPct] = useState(100)
   const [pctMenuOpen, setPctMenuOpen] = useState(false)
   const [template, setTemplate] = useState('{名称}@{倍数}x.{格式}')
   const [tool, setTool] = useState<CanvasTool>('move')
-  const [slices, setSlices] = useState<DocSlice[]>([])
+  const [slices, setSlicesRaw] = useState<DocSlice[]>(() => psd.slices ?? [])
   const [selectedSliceIds, setSelectedSliceIds] = useState<Set<string>>(new Set())
   const [showSlices, setShowSlices] = useState(true)
   const sliceSeq = useRef(1)
+  // 切片撤销栈：切片是小数组，直接存快照比存反操作可靠
+  const histRef = useRef<{ past: DocSlice[][]; future: DocSlice[][] }>({ past: [], future: [] })
+  const editBaseRef = useRef<DocSlice[] | null>(null)
+  const lastSavedRef = useRef<DocSlice[]>(slices)
+  const slicesRef = useRef(slices)
+  slicesRef.current = slices
+  // 批量导出参数（图层与切片共用一套弹层）
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchFmt, setBatchFmt] = useState<ExportFormat>('png')
+  const [batchScales, setBatchScales] = useState<Set<number>>(new Set([2]))
+  const [batchQuality, setBatchQuality] = useState(0.92)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const cancelRef = useRef(false)
   const toast = useToast()
   const dialog = useDialog()
+
+  // 切片的一切修改统一走这里：先记下改动前快照，静置 500ms 后提交历史并持久化
+  const setSlices = useCallback(
+    (next: DocSlice[] | ((prev: DocSlice[]) => DocSlice[])) => {
+      setSlicesRaw((prev) => {
+        if (editBaseRef.current === null) editBaseRef.current = prev
+        return typeof next === 'function' ? next(prev) : next
+      })
+    },
+    []
+  )
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (editBaseRef.current !== null && editBaseRef.current !== slices) {
+        const { past } = histRef.current
+        past.push(editBaseRef.current)
+        if (past.length > 80) past.shift()
+        histRef.current.future = []
+        editBaseRef.current = null
+      }
+      if (lastSavedRef.current !== slices) {
+        lastSavedRef.current = slices
+        onUpdatePsd((p) => {
+          p.slices = slices.length ? slices : undefined
+        })
+      }
+    }, 500)
+    return () => clearTimeout(t)
+  }, [slices, onUpdatePsd])
+
+  const undoSlices = useCallback(() => {
+    const prev = histRef.current.past.pop()
+    if (!prev) return
+    histRef.current.future.push(slicesRef.current)
+    editBaseRef.current = null
+    setSlicesRaw(prev)
+  }, [])
+
+  const redoSlices = useCallback(() => {
+    const next = histRef.current.future.pop()
+    if (!next) return
+    histRef.current.past.push(slicesRef.current)
+    editBaseRef.current = null
+    setSlicesRaw(next)
+  }, [])
 
   // 面板拖拽
   const leftRef = useRef<HTMLElement>(null)
@@ -101,7 +174,10 @@ export default function DetailPage({ project, psd, onBack }: Props) {
   }
 
   useEffect(() => {
-    const close = () => setPctMenuOpen(false)
+    const close = () => {
+      setPctMenuOpen(false)
+      setBatchOpen(false)
+    }
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
   }, [])
@@ -129,8 +205,14 @@ export default function DetailPage({ project, psd, onBack }: Props) {
         setTree(parsed.tree)
         setHiddenIds(new Set())
         setSelectedId(null)
-        setSlices([])
+        setSelectedIds(new Set())
+        // 重新进入时恢复上次持久化的切片，序号接着排
+        const restored = psd.slices ?? []
+        setSlicesRaw(restored)
         setSelectedSliceIds(new Set())
+        editBaseRef.current = null
+        histRef.current = { past: [], future: [] }
+        sliceSeq.current = restored.reduce((m, s) => Math.max(m, Number(s.no) || 0), 0) + 1
         setLoading(false)
         // 结构阶段跳过了全部位图（canvasMap 为空）时，第二遍全量解码补上
         if (parsed.canvasMap.size === 0) {
@@ -154,6 +236,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
                 setTree(fb.tree)
                 setHiddenIds(new Set())
                 setSelectedId(null)
+                setSelectedIds(new Set())
                 toast('主解析器不支持该文件，已使用备用解析器', 'warning')
               } catch {
                 toast('图层位图解码失败', 'error')
@@ -174,21 +257,107 @@ export default function DetailPage({ project, psd, onBack }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [psd.path])
 
-  const findLayer = useCallback(
-    (nodes: PsdLayer[]): PsdLayer | null => {
-      for (const n of nodes) {
-        if (n.id === selectedId) return n
-        const hit = n.children ? findLayer(n.children) : null
-        if (hit) return hit
+  const selectedLayer = selectedId != null ? findInTree(tree, selectedId) : null
+
+  const clearLayerSel = () => {
+    setSelectedId(null)
+    setSelectedIds(new Set())
+    anchorRef.current = null
+  }
+
+  const handleLayerSelect = (layer: PsdLayer | null, mods = { ctrl: false, shift: false }) => {
+    if (!layer) {
+      if (!mods.ctrl) clearLayerSel()
+      return
+    }
+    if (mods.shift && anchorRef.current != null) {
+      const all = flattenLayers(tree)
+      const a = all.findIndex((n) => n.id === anchorRef.current)
+      const b = all.findIndex((n) => n.id === layer.id)
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a < b ? [a, b] : [b, a]
+        setSelectedIds(new Set(all.slice(lo, hi + 1).map((n) => n.id)))
+        setSelectedId(layer.id)
+        return
       }
-      return null
+    }
+    if (mods.ctrl) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(layer.id)) next.delete(layer.id)
+        else next.add(layer.id)
+        return next
+      })
+    } else {
+      setSelectedIds(new Set([layer.id]))
+    }
+    setSelectedId(layer.id)
+    anchorRef.current = layer.id
+  }
+
+  // 右键：不在当前选区里则先单选它
+  const handleLayerContext = (layer: PsdLayer, x: number, y: number) => {
+    if (selectedIds.has(layer.id)) {
+      setMenu({ x, y, ids: [...selectedIds] })
+      return
+    }
+    setSelectedIds(new Set([layer.id]))
+    setSelectedId(layer.id)
+    anchorRef.current = layer.id
+    setMenu({ x, y, ids: [layer.id] })
+  }
+
+  const extOf = (f: ExportFormat) => (f === 'jpeg' ? 'jpg' : f)
+  const applyTemplate = (t: string, name: string, scale: number, format: ExportFormat, seq: number) =>
+    t
+      .replace('{名称}', name)
+      .replace('{倍数}', String(scale))
+      .replace('{格式}', extOf(format))
+      .replace('{序号}', String(seq).padStart(2, '0'))
+
+  // 统一导出管线：目录选一次，逐条「编码→写盘」，随时可取消
+  const writeAll = useCallback(
+    async (items: { name: string; run: () => Promise<Uint8Array | null> }[]) => {
+      if (!items.length) {
+        toast('没有可导出的内容', 'warning')
+        return
+      }
+      const dir = await window.api.pickDir()
+      if (!dir) return
+      cancelRef.current = false
+      setProgress({ done: 0, total: items.length })
+      const used = new Set<string>()
+      let saved = 0
+      let i = 0
+      for (const it of items) {
+        if (cancelRef.current) break
+        let name = it.name
+        let dup = 2
+        while (used.has(name.toLowerCase())) {
+          const m = it.name.match(/^(.*)\.([^.]+)$/)
+          name = m ? `${m[1]}（${dup}）.${m[2]}` : `${it.name}（${dup}）`
+          dup++
+        }
+        used.add(name.toLowerCase())
+        try {
+          const bytes = await it.run()
+          if (bytes && (await window.api.writeExportFile(dir, name, bytes))) saved++
+        } catch {
+          // 单个图层编码失败不阻断整批
+        }
+        i++
+        setProgress({ done: i, total: items.length })
+      }
+      setProgress(null)
+      toast(
+        cancelRef.current ? `已取消，导出 ${saved} / ${items.length} 个文件` : `已导出 ${saved} 个文件到所选目录`
+      )
     },
-    [selectedId]
+    [toast]
   )
-  const selectedLayer = selectedId != null ? findLayer(tree) : null
 
   const handleExport = useCallback(
-    async (format: ExportFormat, scale: number) => {
+    async (format: ExportFormat, scale: number, quality?: number) => {
       if (!selectedLayer || !doc) return
       const canvas = renderLayerCanvas(selectedLayer, rnodes, hiddenIds)
       if (!canvas) {
@@ -196,10 +365,13 @@ export default function DetailPage({ project, psd, onBack }: Props) {
         return
       }
       const safeName = selectedLayer.name.replace(/[\\/:*?"<>|]/g, '_')
-      const ext = format === 'jpeg' ? 'jpg' : format
-      const dataUrl = layerToDataUrl(selectedLayer, canvas, format, scale)
-      const saved = await window.api.saveImage(`${safeName}@${scale}x.${ext}`, format, dataUrl)
-      if (saved) toast(`已导出 ${safeName}@${scale}x.${ext}`)
+      const bytes = await exportCanvasBytes(canvas, { scale, format, quality })
+      if (!bytes) {
+        toast('该图层导出失败', 'error')
+        return
+      }
+      const saved = await window.api.saveImage(`${safeName}@${scale}x.${extOf(format)}`, format, bytes)
+      if (saved) toast(`已导出 ${safeName}@${scale}x.${extOf(format)}`)
     },
     [selectedLayer, doc, rnodes, hiddenIds, toast]
   )
@@ -239,33 +411,42 @@ export default function DetailPage({ project, psd, onBack }: Props) {
     [tree, hiddenIds]
   )
 
-  const exportAll = useCallback(
-    async (format: ExportFormat, scale: number) => {
-      const files: { name: string; dataUrl: string }[] = []
-      let seq = 0
-      for (const node of flattenLayers(tree)) {
-        if (node.type !== 'layer' || node.hidden || hiddenIds.has(node.id)) continue
-        // 走合成器出图：含蒙版、图层样式与剪贴，与画布所见一致
-        const canvas = renderLayerCanvas(node, rnodes, hiddenIds)
-        if (!canvas) continue
-        const safe = node.name.replace(/[\\/:*?"<>|]/g, '_')
-        const ext = format === 'jpeg' ? 'jpg' : format
-        const name = template
-          .replace('{名称}', safe)
-          .replace('{倍数}', String(scale))
-          .replace('{格式}', ext)
-          .replace('{序号}', String(++seq).padStart(2, '0'))
-        files.push({ name, dataUrl: layerToDataUrl(node, canvas, format, scale) })
+  const exportNodes = useCallback(
+    (nodes: PsdLayer[], format: ExportFormat, scales: number[], quality?: number) => {
+      const items: { name: string; run: () => Promise<Uint8Array | null> }[] = []
+      for (const scale of [...scales].sort((a, b) => a - b)) {
+        let seq = 0
+        for (const node of nodes) {
+          // 闭包捕获当前图层；渲染/编码推迟到写盘循环里逐条执行
+          const captured = node
+          items.push({
+            name: applyTemplate(
+              template,
+              captured.name.replace(/[\\/:*?"<>|]/g, '_'),
+              scale,
+              format,
+              ++seq
+            ),
+            run: async () => {
+              // 走合成器出图：含蒙版、图层样式与剪贴，与画布所见一致；组节点合成整棵子树
+              const canvas = renderLayerCanvas(captured, rnodes, hiddenIds)
+              if (!canvas) return null
+              return exportCanvasBytes(canvas, { scale, format, quality })
+            }
+          })
+        }
       }
-      if (!files.length) {
-        toast('没有可导出的图层', 'warning')
-        return
-      }
-      const res = await window.api.saveBatchImages(files)
-      if (res === null) return
-      toast(`已导出 ${res.saved} 个文件到所选目录`)
+      return writeAll(items)
     },
-    [tree, rnodes, hiddenIds, template, toast]
+    [rnodes, hiddenIds, template, writeAll]
+  )
+
+  const exportAll = useCallback(
+    (format: ExportFormat, scales: number[], quality?: number) => {
+      const nodes = flattenLayers(tree).filter((n) => n.type === 'layer' && !n.hidden && !hiddenIds.has(n.id))
+      return exportNodes(nodes, format, scales, quality)
+    },
+    [tree, hiddenIds, exportNodes]
   )
 
   const handleTemplate = async () => {
@@ -318,12 +499,79 @@ export default function DetailPage({ project, psd, onBack }: Props) {
     setSelectedSliceIds(new Set())
   }
 
+  // 右键菜单：按图层包围盒建切片（组用整组外接框），名字带过来
+  const createSlicesFromNodes = (nodes: PsdLayer[]) => {
+    const news: DocSlice[] = nodes
+      .filter((n) => n.width > 0 && n.height > 0)
+      .map((n) => {
+        const no = String(sliceSeq.current++).padStart(2, '0')
+        return {
+          id: `slice-${no}-${Date.now()}`,
+          no,
+          x: n.left,
+          y: n.top,
+          w: n.width,
+          h: n.height,
+          name: n.name.slice(0, 40)
+        }
+      })
+    if (!news.length) return
+    setSlices((prev) => [...prev, ...news])
+    setSelectedSliceIds(new Set(news.map((s) => s.id)))
+    toast(`已从图层创建 ${news.length} 个切片`)
+  }
+
+  // 隔离显示：只留下所选子树内的可见图层，「显示全部」恢复
+  const isolateNodes = (nodes: PsdLayer[]) => {
+    const keep = new Set<number>()
+    const collect = (n: PsdLayer) => {
+      keep.add(n.id)
+      n.children?.forEach(collect)
+    }
+    nodes.forEach(collect)
+    const next = new Set<number>()
+    for (const leaf of flattenLayers(tree)) {
+      if (leaf.type === 'layer' && !keep.has(leaf.id)) next.add(leaf.id)
+    }
+    setHiddenIds(next)
+    toast(`已隔离显示 ${nodes.length} 个图层/组`)
+  }
+
+  const menuItems = (() => {
+    if (!menu) return []
+    const nodes = menu.ids
+      .map((id) => findInTree(tree, id))
+      .filter((n): n is PsdLayer => n !== null)
+    if (!nodes.length) return []
+    return [
+      {
+        label: `导出所选 ${nodes.length} 个图层…`,
+        onClick: () =>
+          void exportNodes(nodes, batchFmt, [...batchScales], batchFmt === 'png' ? undefined : batchQuality)
+      },
+      { label: '从图层创建切片', onClick: () => createSlicesFromNodes(nodes) },
+      { label: '隔离显示', onClick: () => isolateNodes(nodes) },
+      { label: '显示全部图层', onClick: () => setHiddenIds(new Set()) }
+    ]
+  })()
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) redoSlices()
+        else undoSlices()
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        redoSlices()
+        return
+      }
       const map: Record<string, CanvasTool> = { v: 'move', c: 'slice', i: 'picker', h: 'hand' }
       const t = map[e.key.toLowerCase()]
-      if (t) setTool(t)
+      if (t && !e.ctrlKey && !e.metaKey) setTool(t)
       if (e.key === 'Escape') setSelectedSliceIds(new Set())
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedSliceIds.size > 0) {
         setSlices((prev) => prev.filter((s) => !selectedSliceIds.has(s.id)))
@@ -332,42 +580,42 @@ export default function DetailPage({ project, psd, onBack }: Props) {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [selectedSliceIds])
+  }, [selectedSliceIds, setSlices, undoSlices, redoSlices])
 
   const exportSlices = useCallback(
-    async (format: ExportFormat, scale: number) => {
+    async (format: ExportFormat, scales0: number[], quality?: number) => {
       if (!doc) return
       const targets = selectedSliceIds.size > 0 ? slices.filter((s) => selectedSliceIds.has(s.id)) : slices
       if (targets.length === 0) {
         toast('还没有切片，用切片工具在画布上拖拽创建', 'warning')
         return
       }
+      // 整篇合成只做一次，逐切片从大画布裁区域编码
       const composite = buildCompositeCanvas(doc, rnodes, hiddenIds)
       if (!composite) return
-      const ext = format === 'jpeg' ? 'jpg' : format
-      const files = targets.map((s, i) => {
-        const c = document.createElement('canvas')
-        c.width = Math.max(1, Math.round(s.w * scale))
-        c.height = Math.max(1, Math.round(s.h * scale))
-        const ctx = c.getContext('2d')!
-        if (format === 'jpeg') {
-          ctx.fillStyle = '#ffffff'
-          ctx.fillRect(0, 0, c.width, c.height)
+      const items: { name: string; run: () => Promise<Uint8Array | null> }[] = []
+      let seq = 0
+      for (const s of targets) {
+        // 切片自带倍数时只出那一档，否则跟随面板多选
+        const scales = s.scale ? [s.scale] : [...scales0].sort((a, b) => a - b)
+        for (const scale of scales) {
+          const fmt = s.format ?? format
+          const base = (s.name?.trim() || `切片${s.no}`).replace(/[\\/:*?"<>|]/g, '_')
+          items.push({
+            name: applyTemplate(template, base, scale, fmt, ++seq),
+            run: () =>
+              exportCanvasBytes(composite, {
+                scale,
+                format: fmt,
+                quality,
+                srcRect: { x: s.x, y: s.y, w: s.w, h: s.h }
+              })
+          })
         }
-        ctx.scale(scale, scale)
-        ctx.drawImage(composite, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h)
-        const name = template
-          .replace('{名称}', `切片${s.no}`)
-          .replace('{倍数}', String(scale))
-          .replace('{格式}', ext)
-          .replace('{序号}', String(i + 1).padStart(2, '0'))
-        return { name, dataUrl: c.toDataURL(`image/${format}`, 0.92) }
-      })
-      const res = await window.api.saveBatchImages(files)
-      if (res === null) return
-      toast(`已导出 ${res.saved} 个切片到所选目录`)
+      }
+      return writeAll(items)
     },
-    [doc, slices, selectedSliceIds, rnodes, hiddenIds, template, toast]
+    [doc, slices, selectedSliceIds, rnodes, hiddenIds, template, writeAll, toast]
   )
 
   const handlePickColor = useCallback(
@@ -377,6 +625,17 @@ export default function DetailPage({ project, psd, onBack }: Props) {
     },
     [toast]
   )
+
+  const exportTargetCount =
+    tool === 'slice' ? (selectedSliceIds.size > 0 ? selectedSliceIds.size : slices.length) : visibleLayerCount
+
+  const runBatchExport = () => {
+    setBatchOpen(false)
+    const quality = batchFmt === 'png' ? undefined : batchQuality
+    const scales = [...batchScales]
+    if (tool === 'slice') void exportSlices(batchFmt, scales, quality)
+    else void exportAll(batchFmt, scales, quality)
+  }
 
   return (
     <div className="main" style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -389,8 +648,10 @@ export default function DetailPage({ project, psd, onBack }: Props) {
           tree={tree}
           hiddenIds={hiddenIds}
           selectedId={selectedId}
-          onSelect={(l) => setSelectedId(l.id)}
+          selectedIds={selectedIds}
+          onSelect={handleLayerSelect}
           onToggleHidden={toggleHidden}
+          onContextMenu={handleLayerContext}
         />
         <span
           className="panel-resizer"
@@ -407,8 +668,9 @@ export default function DetailPage({ project, psd, onBack }: Props) {
           rnodes={rnodes}
           canvasMap={canvasMapRef.current}
           hiddenIds={hiddenIds}
-          selectedId={selectedId}
-          onSelect={(l) => setSelectedId(l ? l.id : null)}
+          selectedIds={selectedIds}
+          onSelect={handleLayerSelect}
+          onLayerContext={handleLayerContext}
           apiRef={canvasApiRef}
           onZoomChange={setZoomPct}
           tool={tool}
@@ -438,6 +700,15 @@ export default function DetailPage({ project, psd, onBack }: Props) {
               </span>
               {selectedSlice && (
                 <span className="slice-editor">
+                  <input
+                    className="slice-name"
+                    type="text"
+                    placeholder={`切片${selectedSlice.no}`}
+                    title="切片名，导出文件名用它"
+                    value={selectedSlice.name ?? ''}
+                    maxLength={40}
+                    onChange={(e) => updateSelectedSlice({ name: e.target.value })}
+                  />
                   {([['X', 'x'], ['Y', 'y'], ['W', 'w'], ['H', 'h']] as const).map(([label, key]) => (
                     <label key={key}>
                       {label}
@@ -448,17 +719,44 @@ export default function DetailPage({ project, psd, onBack }: Props) {
                       />
                     </label>
                   ))}
+                  <select
+                    value={selectedSlice.format ?? ''}
+                    title="该切片的导出格式（默认跟随批量设置）"
+                    onChange={(e) =>
+                      updateSelectedSlice({ format: (e.target.value || undefined) as ExportFormat | undefined })
+                    }
+                  >
+                    <option value="">格式·跟随</option>
+                    <option value="png">PNG</option>
+                    <option value="jpeg">JPG</option>
+                    <option value="webp">WebP</option>
+                  </select>
+                  <select
+                    value={selectedSlice.scale ?? ''}
+                    title="该切片的导出倍数（默认跟随批量设置）"
+                    onChange={(e) =>
+                      updateSelectedSlice({ scale: e.target.value ? Number(e.target.value) : undefined })
+                    }
+                  >
+                    <option value="">倍数·跟随</option>
+                    <option value="1">@1x</option>
+                    <option value="2">@2x</option>
+                    <option value="3">@3x</option>
+                  </select>
                   <button className="batch-mini" onClick={deleteSelectedSlices}>删除</button>
                 </span>
               )}
               <button className="batch-mini" onClick={() => void handleTemplate()}>
                 命名模板
               </button>
-              <button className="batch-mini" onClick={() => void exportSlices('png', 2)}>
-                全部 @2x
-              </button>
-              <button className="batch-mini go" onClick={() => void exportSlices('png', 2)}>
-                批量导出
+              <button
+                className={`batch-mini go${batchOpen ? ' active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setBatchOpen((v) => !v)
+                }}
+              >
+                批量导出 ▾
               </button>
             </>
           ) : (
@@ -469,14 +767,75 @@ export default function DetailPage({ project, psd, onBack }: Props) {
               <button className="batch-mini" onClick={() => void handleTemplate()}>
                 命名模板
               </button>
-              <button className="batch-mini" onClick={() => void exportAll('png', 2)}>
-                全部 @2x
-              </button>
-              <button className="batch-mini go" onClick={() => void exportAll('png', 2)}>
-                批量导出
+              <button
+                className={`batch-mini go${batchOpen ? ' active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setBatchOpen((v) => !v)
+                }}
+              >
+                批量导出 ▾
               </button>
             </>
           )}
+        </div>
+
+        <div className={`export-pop${batchOpen ? ' open' : ''}`} onClick={(e) => e.stopPropagation()}>
+          <div className="ep-group">
+            <span className="ep-label">格式</span>
+            <div className="ep-opts">
+              {(
+                [
+                  ['png', 'PNG'],
+                  ['jpeg', 'JPG'],
+                  ['webp', 'WebP']
+                ] as [ExportFormat, string][]
+              ).map(([f, l]) => (
+                <button key={f} className={batchFmt === f ? 'on' : ''} onClick={() => setBatchFmt(f)}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="ep-group">
+            <span className="ep-label">倍数</span>
+            <div className="ep-opts">
+              {[1, 2, 3].map((s) => (
+                <button
+                  key={s}
+                  className={batchScales.has(s) ? 'on' : ''}
+                  onClick={() =>
+                    setBatchScales((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(s)) next.delete(s)
+                      else next.add(s)
+                      if (next.size === 0) next.add(s)
+                      return next
+                    })
+                  }
+                >
+                  @{s}x
+                </button>
+              ))}
+            </div>
+          </div>
+          {batchFmt !== 'png' && (
+            <div className="ep-group">
+              <span className="ep-label">质量</span>
+              <input
+                type="range"
+                min={0.5}
+                max={1}
+                step={0.01}
+                value={batchQuality}
+                onChange={(e) => setBatchQuality(Number(e.target.value))}
+              />
+              <b className="ep-q">{Math.round(batchQuality * 100)}%</b>
+            </div>
+          )}
+          <button className="btn btn-primary ep-go" onClick={runBatchExport}>
+            导出 {exportTargetCount * batchScales.size} 个文件
+          </button>
         </div>
 
         <div className="zoombar">
@@ -567,6 +926,24 @@ export default function DetailPage({ project, psd, onBack }: Props) {
           </span>
         </div>
 
+        {progress && (
+          <div className="export-mask">
+            <div className="export-progress">
+              <p>
+                正在导出 <b>{progress.done}</b> / {progress.total}
+              </p>
+              <div className="ep-bar">
+                <i style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }} />
+              </div>
+              <div className="row2">
+                <button className="btn btn-ghost" onClick={() => (cancelRef.current = true)}>
+                  取消
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {(loading || decoding) && (
           <div
             style={{
@@ -609,6 +986,7 @@ export default function DetailPage({ project, psd, onBack }: Props) {
           onExport={handleExport}
         />
       </aside>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
     </div>
   )
 }

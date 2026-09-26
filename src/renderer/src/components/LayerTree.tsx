@@ -15,8 +15,10 @@ interface Props {
   tree: PsdLayer[]
   hiddenIds: Set<number>
   selectedId: number | null
-  onSelect: (layer: PsdLayer) => void
+  selectedIds: Set<number>
+  onSelect: (layer: PsdLayer, mods: { ctrl: boolean; shift: boolean }) => void
   onToggleHidden: (id: number) => void
+  onContextMenu?: (layer: PsdLayer, x: number, y: number) => void
 }
 
 function matchesSearch(node: PsdLayer, query: string): boolean {
@@ -44,25 +46,27 @@ function Row({
   depth,
   searching,
   hiddenIds,
-  selectedId,
+  selectedIds,
   collapsed,
   toggleCollapse,
   onSelect,
-  onToggleHidden
+  onToggleHidden,
+  onContextMenu
 }: {
   layer: PsdLayer
   depth: number
   searching: boolean
   hiddenIds: Set<number>
-  selectedId: number | null
+  selectedIds: Set<number>
   collapsed: Set<number>
   toggleCollapse: (id: number) => void
-  onSelect: (layer: PsdLayer) => void
+  onSelect: Props['onSelect']
   onToggleHidden: (id: number) => void
+  onContextMenu?: Props['onContextMenu']
 }) {
   const isHidden = layer.hidden || hiddenIds.has(layer.id)
   const isCollapsed = collapsed.has(layer.id) && !searching
-  const isSelected = selectedId === layer.id
+  const isSelected = selectedIds.has(layer.id)
 
   return (
     <>
@@ -72,7 +76,15 @@ function Row({
         }`}
         data-layer-id={layer.id}
         style={{ paddingLeft: 6 + depth * 14 }}
-        onClick={() => onSelect(layer)}
+        onClick={(e) =>
+          onSelect(layer, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })
+        }
+        onContextMenu={(e) => {
+          if (!onContextMenu) return
+          e.preventDefault()
+          e.stopPropagation()
+          onContextMenu(layer, e.clientX, e.clientY)
+        }}
       >
         {layer.children ? (
           <span
@@ -117,11 +129,12 @@ function Row({
             depth={depth + 1}
             searching={searching}
             hiddenIds={hiddenIds}
-            selectedId={selectedId}
+            selectedIds={selectedIds}
             collapsed={collapsed}
             toggleCollapse={toggleCollapse}
             onSelect={onSelect}
             onToggleHidden={onToggleHidden}
+            onContextMenu={onContextMenu}
           />
         ))}
     </>
@@ -132,8 +145,10 @@ export default function LayerTree({
   tree,
   hiddenIds,
   selectedId,
+  selectedIds,
   onSelect,
-  onToggleHidden
+  onToggleHidden,
+  onContextMenu
 }: Props) {
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
@@ -209,11 +224,12 @@ export default function LayerTree({
               depth={0}
               searching={query.trim().length > 0}
               hiddenIds={hiddenIds}
-              selectedId={selectedId}
+              selectedIds={selectedIds}
               collapsed={collapsed}
               toggleCollapse={toggleCollapse}
               onSelect={onSelect}
               onToggleHidden={onToggleHidden}
+              onContextMenu={onContextMenu}
             />
           ))
         )}
