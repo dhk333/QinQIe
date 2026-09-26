@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ShortcutsPanel from '@/components/ShortcutsPanel'
 import AppLogo from '@/components/AppLogo'
+import Slider from '@/components/Slider'
 import ChangelogPage from '@/pages/ChangelogPage'
 import { useDialog, useToast } from '@/lib/ui'
 import { loadExportPrefs, saveExportPrefs, type ExportPrefs } from '@/lib/exportPrefs'
@@ -405,14 +406,13 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
             <div className="es-row">
               <span className="es-label">默认质量</span>
               <div className="es-q">
-                <input
-                  type="range"
+                <Slider
                   min={0.5}
                   max={1}
                   step={0.01}
                   value={prefs.quality}
                   disabled={prefs.format === 'png'}
-                  onChange={(e) => setPref({ quality: Number(e.target.value) })}
+                  onChange={(q) => setPref({ quality: q })}
                 />
                 <b>{Math.round(prefs.quality * 100)}%</b>
               </div>

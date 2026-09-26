@@ -4,6 +4,7 @@ import { layerCssSnippet, sampleColor } from '@/lib/export'
 import { renderLayerCanvas } from '@/lib/psd'
 import type { RNode } from '@/lib/compositor'
 import { CheckIcon, CopyIcon } from './icons'
+import Slider from './Slider'
 
 interface Props {
   layer: PsdLayer | null
@@ -223,14 +224,12 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
         {format !== 'png' && (
           <div className="mb-3 flex items-center gap-2">
             <span className="text-[11px] text-txt-3">质量</span>
-            <input
-              type="range"
+            <Slider
               min={0.5}
               max={1}
               step={0.01}
               value={quality}
-              onChange={(e) => setQuality(Number(e.target.value))}
-              style={{ flex: 1, accentColor: 'var(--accent)' }}
+              onChange={setQuality}
             />
             <b className="font-mono text-[11px] text-txt-2">{Math.round(quality * 100)}%</b>
           </div>

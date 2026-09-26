@@ -15,6 +15,7 @@ import { useDialog, useToast } from '@/lib/ui'
 import LayerTree, { type LayerTreeApi } from '@/components/LayerTree'
 import CanvasView, { type CanvasTool, type CanvasViewApi } from '@/components/CanvasView'
 import ContextMenu from '@/components/ContextMenu'
+import Slider from '@/components/Slider'
 import AppLogo from '@/components/AppLogo'
 import PropertiesPanel from '@/components/PropertiesPanel'
 import {
@@ -991,13 +992,12 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           {batchFmt !== 'png' && (
             <div className="ep-group">
               <span className="ep-label">质量</span>
-              <input
-                type="range"
+              <Slider
                 min={0.5}
                 max={1}
                 step={0.01}
                 value={batchQuality}
-                onChange={(e) => setBatchQuality(Number(e.target.value))}
+                onChange={setBatchQuality}
               />
               <b className="ep-q">{Math.round(batchQuality * 100)}%</b>
             </div>

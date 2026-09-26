@@ -156,13 +156,35 @@ body {
 .btn-ghost:hover, .btn-secondary:hover { background: var(--panel-2); border-color: var(--line-2); }
 .btn-primary {
   color: #fff;
-  background: var(--accent-grad);
+  background: var(--accent);
 }
-.g-topbar .btn-primary { background: var(--accent); }
-.g-topbar .btn-primary:hover { background: var(--accent-2); }
 .btn-primary:hover { filter: brightness(1.12); transform: translateY(-1px); }
 .btn-primary:active { transform: scale(0.97); }
 .btn-primary:disabled { opacity: 0.5; pointer-events: none; }
+
+/* div 实现的滑杆（替代原生 range），轨道 / 填充 / 手柄全部跟随主题 */
+.ui-slider {
+  position: relative; flex: 1; height: 20px; display: flex; align-items: center;
+  cursor: pointer; touch-action: none; outline: none;
+}
+.ui-slider::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 4px;
+  transform: translateY(-50%); border-radius: 999px; background: var(--line-2);
+}
+.ui-slider-fill {
+  position: absolute; left: 0; top: 50%; height: 4px; transform: translateY(-50%);
+  border-radius: 999px; background: var(--accent);
+}
+.ui-slider-knob {
+  position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
+  transform: translate(-50%, -50%); background: var(--bg);
+  border: 2px solid var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: box-shadow 0.13s;
+}
+.ui-slider:hover .ui-slider-knob,
+.ui-slider:focus-visible .ui-slider-knob { box-shadow: 0 0 0 4px var(--accent-dim); }
+.ui-slider:active .ui-slider-knob { transform: translate(-50%, -50%) scale(1.15); }
+.ui-slider-dis { opacity: 0.4; pointer-events: none; }
 .btn-danger { color: #fff; background: linear-gradient(135deg, #dc2626, #ef4444 60%, #f87171); box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3); }
 .btn-danger:hover { filter: brightness(1.1); transform: translateY(-1px); }
 .btn-danger:active { transform: scale(0.97); }
@@ -594,7 +616,7 @@ body.dark .theme-toggle .icon-moon { display: none; }
 }
 .batch-bar .batch-mini:hover { color: var(--txt); background: var(--panel-3); }
 .batch-bar .batch-mini.go {
-  background: var(--accent-grad); color: #fff; border: none;
+  background: var(--accent); color: #fff; border: none;
 }
 .batch-bar > * { flex-shrink: 0; }
 .slice-editor { display: flex; align-items: center; gap: 6px; }
@@ -635,11 +657,11 @@ body.dark .theme-toggle .icon-moon { display: none; }
 .code-block { user-select: text; cursor: text; }
 
 .layer-preview {
-  height: 140px; display: grid; place-items: center; overflow: hidden;
+  min-height: 140px; height: auto; display: grid; place-items: center; overflow: hidden;
   border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px;
   background: repeating-conic-gradient(var(--panel-2) 0 25%, var(--bg) 0 50%) 0 0 / 16px 16px;
 }
-.layer-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.layer-preview img { max-width: 100%; }
 .layer-preview span { font-size: 11px; color: var(--txt-3); }
 
 /* ========== 批量导出面板 ========== */
@@ -668,7 +690,7 @@ body.dark .theme-toggle .icon-moon { display: none; }
 }
 .ep-opts button:hover { border-color: var(--line-2); color: var(--txt); }
 .ep-opts button.on { border-color: var(--accent); background: var(--accent-dim); color: var(--txt); }
-.ep-group input[type="range"] { flex: 1; accent-color: var(--accent); }
+.ep-group .ui-slider { flex: 1; }
 .ep-q { width: 34px; text-align: right; font-family: Consolas, monospace; font-size: 11px; color: var(--txt-2); }
 .ep-go { width: 100%; margin-top: 2px; }
 .batch-bar .batch-mini.go.active { filter: brightness(1.12); box-shadow: 0 0 0 2px var(--accent-dim); }
@@ -917,8 +939,7 @@ body.dark .theme-toggle .icon-moon { display: none; }
 .es-seg button:hover { color: var(--txt); }
 .es-seg button.on { border-color: var(--accent); color: var(--accent-2); background: var(--accent-dim); }
 .es-q { display: flex; align-items: center; gap: 10px; flex: 1; max-width: 300px; }
-.es-q input[type='range'] { flex: 1; accent-color: var(--accent); }
-.es-q input:disabled { opacity: 0.4; }
+.es-q .ui-slider { flex: 1; }
 .es-q b { font-size: 11.5px; color: var(--txt-2); font-family: Consolas, monospace; width: 34px; }
 .es-note { margin: 2px 0 0; font-size: 11px; }
 /* 存储与缓存 */
