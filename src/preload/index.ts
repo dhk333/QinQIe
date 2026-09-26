@@ -22,7 +22,13 @@ const api = {
     ipcRenderer.invoke('image:save', defaultName, format, bytes),
   pickDir: (): Promise<string | null> => ipcRenderer.invoke('dir:pick'),
   writeExportFile: (dir: string, name: string, bytes: Uint8Array): Promise<boolean> =>
-    ipcRenderer.invoke('file:write-bytes', dir, name, bytes)
+    ipcRenderer.invoke('file:write-bytes', dir, name, bytes),
+  // 原生菜单点击 → 渲染层命令分发（与快捷键同源）
+  onMenuExec: (cb: (id: string) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, id: string): void => cb(id)
+    ipcRenderer.on('menu:exec', listener)
+    return () => ipcRenderer.removeListener('menu:exec', listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

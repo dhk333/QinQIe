@@ -237,3 +237,49 @@ export function HandIcon({ className }: IconProps) {
     </svg>
   )
 }
+
+export function PaletteIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <path d="M12 21a9 9 0 1 1 9-9c0 2-1.5 3-3 3h-1.5a1.5 1.5 0 0 0-1.1 2.5c.4.5.6.9.6 1.4 0 .7-.6 1.1-1.5 1.1Z" />
+      <path d="M7.5 10.5h.01M10.5 7h.01M14.5 7.5h.01M17 11h.01" strokeLinecap="round" strokeWidth="2.2" />
+    </svg>
+  )
+}
+
+export function InfoIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5M12 8h.01" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function KeyboardIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <rect x="2.5" y="6" width="19" height="12" rx="2.5" />
+      <path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 12.5h.01M9.5 12.5h.01M13 12.5h.01M16.5 12.5h.01M8 15.5h8" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  )
+}
+
+export function FontIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" y1="20" x2="15" y2="20" />
+      <line x1="12" y1="4" x2="12" y2="20" />
+    </svg>
+  )
+}
+
+export function GearIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps} strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </svg>
+  )
+}

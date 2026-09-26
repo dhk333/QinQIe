@@ -1,4 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
+import type { MenuItemConstructorOptions } from 'electron'
+import { KEY_COMMANDS, type KeyCommand } from '../shared/keymap'
 import { readFile, writeFile, mkdir, stat, access } from 'fs/promises'
 import { join, basename } from 'path'
 import { createHash } from 'crypto'
@@ -6,6 +8,52 @@ import { readPsd, initializeCanvas } from 'ag-psd'
 import { createCanvas } from '@napi-rs/canvas'
 
 initializeCanvas((width, height) => createCanvas(width, height))
+
+// ========== 应用菜单（与 shared/keymap 同源） ==========
+// 所有自定义项 registerAccelerator:false：键位统一由渲染层按 keymap 处理，
+// 避免在输入框聚焦时被系统 accelerator 抢键；菜单点击经 menu:exec 回灌同一分发器。
+function exec(id: string): void {
+  BrowserWindow.getFocusedWindow()?.webContents.send('menu:exec', id)
+}
+
+function cmdItems(groups: KeyCommand['group'][]): MenuItemConstructorOptions[] {
+  return KEY_COMMANDS.filter((c) => groups.includes(c.group) && c.accelerator).map(
+    (c) => ({
+      label: c.accelerator === '?' ? `${c.label}  (?)` : c.label,
+      accelerator: c.accelerator === '?' ? undefined : c.accelerator,
+      registerAccelerator: false,
+      click: () => exec(c.id)
+    })
+  )
+}
+
+function buildAppMenu(): Menu {
+  return Menu.buildFromTemplate([
+    {
+      label: '轻切',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'close' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    { label: '编辑', submenu: cmdItems(['工具', '选择', '编辑']) },
+    {
+      label: '视图',
+      submenu: [
+        ...cmdItems(['视图', '界面']),
+        { type: 'separator' },
+        { role: 'reload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    { label: '图层', submenu: cmdItems(['图层']) },
+    { label: '导出', submenu: cmdItems(['导出']) }
+  ])
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -38,7 +86,10 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  Menu.setApplicationMenu(buildAppMenu())
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
