@@ -9,6 +9,7 @@ import {
   renderLayerCanvas
 } from '@/lib/psd'
 import { exportCanvasBytes } from '@/lib/export'
+import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
 import { matchCommand, effectiveDisplay, COMMAND_MAP } from '@shared/keymap'
 import { useDialog, useToast } from '@/lib/ui'
 import LayerTree, { type LayerTreeApi } from '@/components/LayerTree'
@@ -74,9 +75,13 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   slicesRef.current = slices
   // 批量导出参数（图层与切片共用一套弹层）
   const [batchOpen, setBatchOpen] = useState(false)
-  const [batchFmt, setBatchFmt] = useState<ExportFormat>('png')
-  const [batchScales, setBatchScales] = useState<Set<number>>(new Set([2]))
-  const [batchQuality, setBatchQuality] = useState(0.92)
+  const [batchFmt, setBatchFmt] = useState<ExportFormat>(() => loadExportPrefs().format)
+  const [batchScales, setBatchScales] = useState<Set<number>>(() => new Set(loadExportPrefs().scales))
+  const [batchQuality, setBatchQuality] = useState(() => loadExportPrefs().quality)
+  useEffect(() => {
+    if (batchScales.size)
+      saveExportPrefs({ format: batchFmt, scales: [...batchScales].sort((a, b) => a - b), quality: batchQuality })
+  }, [batchFmt, batchScales, batchQuality])
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const cancelRef = useRef(false)
   const layerTreeRef = useRef<LayerTreeApi>(null)

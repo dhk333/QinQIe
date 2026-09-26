@@ -23,6 +23,11 @@ const api = {
   pickDir: (): Promise<string | null> => ipcRenderer.invoke('dir:pick'),
   writeExportFile: (dir: string, name: string, bytes: Uint8Array): Promise<boolean> =>
     ipcRenderer.invoke('file:write-bytes', dir, name, bytes),
+  // 存储与缓存
+  openDataDir: (): Promise<string> => ipcRenderer.invoke('app:open-data-dir'),
+  dataStats: (): Promise<{ root: string; total: number; thumbs: number }> =>
+    ipcRenderer.invoke('app:data-stats'),
+  clearThumbCache: (): Promise<number> => ipcRenderer.invoke('app:clear-thumb-cache'),
   // 更新检查
   checkUpdate: (): Promise<{ version: string; url: string; notes: string } | null> =>
     ipcRenderer.invoke('app:check-update'),

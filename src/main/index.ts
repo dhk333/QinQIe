@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { KEY_COMMANDS, type KeyCommand } from '../shared/keymap'
-import { readFile, writeFile, mkdir, stat, access } from 'fs/promises'
+import { readFile, writeFile, mkdir, stat, access, readdir, rm } from 'fs/promises'
 import { join, basename } from 'path'
 import { createHash } from 'crypto'
 import { readPsd, initializeCanvas } from 'ag-psd'
@@ -128,6 +128,34 @@ ipcMain.handle('projects:save', async (_e, data: unknown): Promise<boolean> => {
   await mkdir(app.getPath('userData'), { recursive: true })
   await writeFile(projectsFile(), JSON.stringify(data, null, 2), 'utf-8')
   return true
+})
+
+// ========== 存储与缓存 ==========
+async function dirSize(dir: string): Promise<number> {
+  let sum = 0
+  try {
+    for (const it of await readdir(dir, { withFileTypes: true })) {
+      const p = join(dir, it.name)
+      sum += it.isDirectory() ? await dirSize(p) : (await stat(p)).size
+    }
+  } catch {
+    // 目录不存在按 0 计
+  }
+  return sum
+}
+
+ipcMain.handle('app:open-data-dir', (): Promise<string> => shell.openPath(app.getPath('userData')))
+
+ipcMain.handle('app:data-stats', async (): Promise<{ root: string; total: number; thumbs: number }> => {
+  const root = app.getPath('userData')
+  return { root, total: await dirSize(root), thumbs: await dirSize(join(root, 'thumbnails')) }
+})
+
+ipcMain.handle('app:clear-thumb-cache', async (): Promise<number> => {
+  const thumbDir = join(app.getPath('userData'), 'thumbnails')
+  const freed = await dirSize(thumbDir)
+  await rm(thumbDir, { recursive: true, force: true })
+  return freed
 })
 
 // ========== 更新检查（GitHub Releases，无后端；失败一律静默） ==========
