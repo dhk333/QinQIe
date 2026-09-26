@@ -23,6 +23,9 @@ const api = {
   pickDir: (): Promise<string | null> => ipcRenderer.invoke('dir:pick'),
   writeExportFile: (dir: string, name: string, bytes: Uint8Array): Promise<boolean> =>
     ipcRenderer.invoke('file:write-bytes', dir, name, bytes),
+  // 更新检查
+  checkUpdate: (): Promise<{ version: string; url: string; notes: string } | null> =>
+    ipcRenderer.invoke('app:check-update'),
   // 原生菜单点击 → 渲染层命令分发（与快捷键同源）
   onMenuExec: (cb: (id: string) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, id: string): void => cb(id)

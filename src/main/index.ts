@@ -130,6 +130,42 @@ ipcMain.handle('projects:save', async (_e, data: unknown): Promise<boolean> => {
   return true
 })
 
+// ========== 更新检查（GitHub Releases，无后端；失败一律静默） ==========
+function cmpVer(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d) return d
+  }
+  return 0
+}
+
+const REPO = 'dhk333/QinQIe'
+
+ipcMain.handle(
+  'app:check-update',
+  async (): Promise<{ version: string; url: string; notes: string } | null> => {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'qingqie-desktop' }
+      })
+      if (!res.ok) return null
+      const rel = (await res.json()) as { tag_name?: string; html_url?: string; body?: string }
+      const version = (rel.tag_name || '').replace(/^v/i, '')
+      if (!/^\d+(\.\d+)*$/.test(version) || cmpVer(version, app.getVersion()) <= 0) return null
+      return {
+        version,
+        url: rel.html_url || `https://github.com/${REPO}/releases`,
+        notes: rel.body || ''
+      }
+    } catch {
+      return null
+    }
+  }
+)
+
 // ========== PSD 文件 ==========
 const PSD_FILTERS = [{ name: 'Photoshop 文件', extensions: ['psd'] }]
 

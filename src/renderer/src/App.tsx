@@ -23,9 +23,21 @@ export default function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [settingsFrom, setSettingsFrom] = useState('#/home')
+  const [update, setUpdate] = useState<{ version: string; url: string; notes: string } | null>(null)
   const dialog = useDialog()
   const toast = useToast()
   const uploadRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    window.api.checkUpdate().then((u) => {
+      if (!u || !alive) return
+      if (localStorage.getItem('qq:update-dismissed') !== u.version) setUpdate(u)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     applyTheme(theme)
@@ -130,6 +142,26 @@ export default function App() {
             <AppLogo size={25} />
           </div>
           <span className="name">轻切</span>
+          {update && (
+            <span
+              className="upd-pill"
+              title="点击查看 Release 并下载新版本"
+              onClick={() => window.open(update.url)}
+            >
+              新版 v{update.version}
+              <button
+                className="upd-x"
+                title="本次不再提醒"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  localStorage.setItem('qq:update-dismissed', update.version)
+                  setUpdate(null)
+                }}
+              >
+                ×
+              </button>
+            </span>
+          )}
         </div>
 
         {route.name === 'project' && currentProject && (
