@@ -2,6 +2,7 @@
 
 /* ========== 主题变量（默认亮色，body.dark 切换暗色） ========== */
 :root {
+  --tb-ctl-h: 32px;
   --bg: #f3f5f9;
   --panel: #ffffff;
   --panel-2: #f5f7fb;
@@ -109,7 +110,6 @@ body {
 
 /* ========== 动效 ========== */
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes page-enter-kf { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes pop-in-kf { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -123,6 +123,7 @@ body {
 
 /* ========== 全局顶栏 ========== */
 .g-topbar {
+  --win-ctl-w: 132px; /* 3 × 44px 窗口按钮，顶栏居中的参考边界 */
   height: 52px; flex-shrink: 0;
   display: flex; align-items: center; gap: 12px; padding: 0 0 0 16px;
   border-bottom: 1px solid var(--line);
@@ -141,7 +142,7 @@ body {
 .g-topbar .win-controls {
   -webkit-app-region: no-drag;
 }
-.win-controls { display: flex; align-items: stretch; align-self: stretch; }
+.win-controls { width: var(--win-ctl-w); display: flex; align-items: stretch; align-self: stretch; }
 .win-btn {
   width: 44px; display: grid; place-items: center;
   color: var(--txt-2); cursor: pointer; transition: all 0.12s;
@@ -152,30 +153,50 @@ body {
 .g-topbar .g-spacer { flex: 1; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .logo {
-  width: 21px; height: 21px; border-radius: 6px;
+  width: 31px; height: 31px; border-radius: 4px;
   display: grid; place-items: center;
   background: var(--panel);
   border: 1px solid var(--line);
 }
 .brand .name { font-size: 15px; font-weight: 600; }
-.ver { font-size: 10px; color: var(--txt-3); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 8px; font-family: 'IBM Plex Mono', Consolas, monospace; }
 .back-btn {
-  width: 30px; height: 30px; display: grid; place-items: center;
+  width: 32px; height: 32px; display: grid; place-items: center;
   border-radius: 8px; color: var(--txt-2); cursor: pointer; transition: all 0.15s;
 }
 .back-btn:hover { background: var(--panel-2); color: var(--txt); }
 .back-btn svg { width: 15px; height: 15px; }
-.page-title { font-size: 16px; font-weight: 600; }
+/* 顶栏控件统一高度，避免按钮 / 标签 / 搜索框高低不齐 */
+.g-topbar .btn,
+.g-topbar .back-btn,
+.g-topbar .theme-toggle,
+.g-topbar .file-chip,
+.g-topbar .tb-search { height: var(--tb-ctl-h); }
+.g-topbar .btn { padding-top: 0; padding-bottom: 0; }
 .file-chip {
+  /* 在「顶栏减去右侧窗口按钮」的可用宽度里水平居中，视觉中线不被 caption 按钮拉偏 */
+  position: absolute; left: calc((100% - var(--win-ctl-w)) / 2); top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc((100% - var(--win-ctl-w)) * 0.5); min-width: 0;
   display: flex; align-items: center; gap: 8px;
   background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: 8px; padding: 6px 12px;
-  color: var(--txt-2); font-size: 12px;
+  border-radius: 8px; padding: 0 12px;
+  color: var(--txt-2); font-size: 12px; line-height: 1; white-space: nowrap;
 }
-.file-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green, #16a34a); box-shadow: 0 0 6px currentColor; }
-.file-chip .path { font-family: Consolas, monospace; font-size: 11px; }
+.file-chip .path {
+  font-family: Consolas, monospace; font-size: 11px;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
 .file-chip .crumb { color: var(--txt-3); }
 .file-chip .crumb b { color: var(--txt-2); font-weight: 500; }
+.tb-search {
+  display: flex; align-items: center; gap: 8px; width: 220px;
+  padding: 0 12px; background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 999px;
+}
+.tb-search input {
+  flex: 1; min-width: 0; background: none; border: none; outline: none;
+  color: var(--txt); font-size: 12px; font-family: inherit;
+}
 .pname {
   font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;
   cursor: pointer; border-radius: 8px; padding: 4px 8px; transition: background 0.15s;
@@ -260,6 +281,32 @@ body.dark .theme-toggle .icon-moon { display: none; }
   border: 1px solid var(--line-2); border-radius: 7px; color: var(--txt-2); font-size: 11px;
 }
 .proj-card .ops span:hover { color: var(--txt); }
+
+/* ========== 更新记录 ========== */
+.changelog-main { flex: 1; overflow: auto; padding: 26px 28px 40px; }
+.cl-list { max-width: 760px; display: flex; flex-direction: column; gap: 14px; }
+.cl-item {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 15px 18px 16px;
+}
+.cl-head { display: flex; align-items: center; gap: 10px; }
+.cl-ver {
+  font-family: 'IBM Plex Mono', Consolas, monospace; font-size: 13px; font-weight: 600;
+  color: var(--accent-2); background: var(--accent-dim);
+  border-radius: 7px; padding: 3px 9px;
+}
+.cl-title { font-size: 13.5px; font-weight: 600; }
+.cl-cur {
+  font-size: 10px; color: var(--accent-2);
+  border: 1px solid var(--accent); border-radius: 999px; padding: 1px 7px;
+}
+.cl-meta { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--txt-3); font-family: Consolas, monospace; }
+.cl-points { margin: 11px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.cl-points li { position: relative; padding-left: 15px; font-size: 12.5px; line-height: 1.7; color: var(--txt-2); user-select: text; }
+.cl-points li::before {
+  content: ''; position: absolute; left: 2px; top: 9px;
+  width: 4px; height: 4px; border-radius: 50%; background: var(--line-2);
+}
 
 /* ========== 项目列表页 ========== */
 .proj-body { flex: 1; display: flex; min-height: 0; }
@@ -481,6 +528,9 @@ body.dark .theme-toggle .icon-moon { display: none; }
   100% { stroke-dashoffset: -1; }
 }
 @media (prefers-reduced-motion: reduce) { .logo-draw path { animation: logo-draw 4s linear infinite !important; } }
+
+/* 代码块：全局 body 禁了选区，这里放行让鼠标能框选复制 */
+.code-block { user-select: text; cursor: text; }
 
 .layer-preview {
   height: 140px; display: grid; place-items: center; overflow: hidden;
