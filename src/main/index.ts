@@ -28,6 +28,8 @@ function cmdItems(groups: KeyCommand['group'][]): MenuItemConstructorOptions[] {
 }
 
 function buildAppMenu(): Menu {
+  // 开发者工具只在 dev 暴露；安装包（正式包）不带调试入口
+  const isDev = !!process.env.ELECTRON_RENDERER_URL
   return Menu.buildFromTemplate([
     {
       label: '轻切',
@@ -45,7 +47,7 @@ function buildAppMenu(): Menu {
         ...cmdItems(['视图', '界面']),
         { type: 'separator' },
         { role: 'reload' },
-        { role: 'toggleDevTools' },
+        ...(isDev ? [{ role: 'toggleDevTools' as const }] : []),
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]

@@ -9,6 +9,12 @@ export interface Release {
 /** 与仓库根目录 更新记录.md 保持同一份口径，最新在前 */
 export const RELEASES: Release[] = [
   {
+    version: 'v0.8.5',
+    date: '2026-09-26',
+    title: '正式包移除调试入口',
+    points: ['安装包「视图」菜单不再提供开发者工具项，仅开发模式可用']
+  },
+  {
     version: 'v0.8.4',
     date: '2026-09-26',
     title: '距离测量改为 Figma 式边缘间距',
