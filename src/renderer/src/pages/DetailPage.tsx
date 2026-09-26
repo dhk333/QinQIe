@@ -59,6 +59,73 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const anchorRef = useRef<number | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; ids: number[] } | null>(null)
   const [loading, setLoading] = useState(true)
+  /** 加载进度：loadTarget 是里程碑下限，loadPct 按「恒定慢速上升」逐帧逼近它。
+   *  条和数字共用同一个 loadPct，永不错位；未到终点前始终保持可见的移动，
+   *  不会在某档停住等下一档——主线程被解码卡住时整屏本就冻结，恢复后继续爬。 */
+  const [loadTarget, setLoadTarget] = useState(0)
+  const [loadPct, setLoadPct] = useState(0)
+  const contentReady = !loading && !decoding
+  useEffect(() => {
+    if (!contentReady) return
+    setLoadTarget(100)
+  }, [contentReady])
+  useEffect(() => {
+    let raf = 0
+    let last = performance.now()
+    const tick = (now: number) => {
+      const dt = Math.min(0.25, (now - last) / 1000)
+      last = now
+      setLoadPct((p) => {
+        // 未到下一档里程碑时保持 2%/s 蠕行，永不停死；冲刺里程碑时用远快近慢速度
+        const gap = loadTarget - p
+        if (gap > 0.05) {
+          const speed = gap > 30 ? 26 : gap > 10 ? 14 : 8
+          return Math.min(loadTarget, p + speed * dt)
+        }
+        return p >= 100 ? p : Math.min(99, p + 2 * dt)
+      })
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [loadTarget])
+  /** 加载完成后加载层不立即卸载：先播完渐出动画再由 onAnimationEnd 移除 */
+  const [loaderGone, setLoaderGone] = useState(false)
+  /** 出屏许可：进度条缓动真正爬满后才允许加载层渐出，避免半途消失 */
+  const [exitArmed, setExitArmed] = useState(false)
+  useEffect(() => {
+    if (!contentReady) {
+      setLoaderGone(false)
+      setExitArmed(false)
+      return
+    }
+    if (loadPct >= 99.6) {
+      setExitArmed(true)
+      return
+    }
+    // 兜底：极端情况下最多再等 2s 也必须放行
+    const t = setTimeout(() => setExitArmed(true), 2000)
+    return () => clearTimeout(t)
+  }, [contentReady, loadPct])
+  /** 入场许可：布局先在加载层遮挡下挂载并完成首轮合成（重活、会卡主线程），
+   *  之后才同时点亮加载层渐出与面板/画布入场动画，保证动画全程可见 */
+  const [entered, setEntered] = useState(false)
+  useEffect(() => {
+    if (!exitArmed) {
+      setEntered(false)
+      return
+    }
+    let t = 0
+    const r1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        t = window.setTimeout(() => setEntered(true), 120)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(r1)
+      clearTimeout(t)
+    }
+  }, [exitArmed])
   const canvasApiRef = useRef<CanvasViewApi | null>(null)
   const [zoomPct, setZoomPct] = useState(100)
   const [pctMenuOpen, setPctMenuOpen] = useState(false)
@@ -197,10 +264,12 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   useEffect(() => {
     let alive = true
     setLoading(true)
+    setLoadTarget(5)
     window.api
       .readPsdByPath(psd.path)
       .then(async ({ name, buffer }) => {
         if (!alive) return
+        setLoadTarget(30)
         let parsed
         try {
           // 两阶段加载：先只做结构解析（~50ms）让图层树/面板立即可用
@@ -224,16 +293,20 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         editBaseRef.current = null
         histRef.current = { past: [], future: [] }
         sliceSeq.current = restored.reduce((m, s) => Math.max(m, Number(s.no) || 0), 0) + 1
+        setLoadTarget(60)
         setLoading(false)
         // 结构阶段跳过了全部位图（canvasMap 为空）时，第二遍全量解码补上
         if (parsed.canvasMap.size === 0) {
           setDecoding(true)
+          // 解码会长时间阻塞主线程：先把条放到 88，靠合成器的 transform 过渡继续缓滑
+          setLoadTarget(88)
           setTimeout(async () => {
             if (!alive) return
             try {
               const decoded = decodeLayerCanvases(buffer, parsed.tree)
               canvasMapRef.current = decoded.canvasMap
               setRnodes(decoded.rnodes)
+              setLoadTarget(100)
               setDecoding(false)
             } catch {
               // ag-psd 能读结构但位图/蒙版数据解不动（如 Invalid mask size），
@@ -252,6 +325,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
               } catch {
                 toast('图层位图解码失败', 'error')
               }
+              setLoadTarget(100)
               setDecoding(false)
             }
           }, 80)
@@ -804,8 +878,46 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     }
   }
 
+  const loaderInner = (
+    <>
+      <div style={{ marginBottom: 16 }}>
+        <AppLogo size={54} />
+      </div>
+      <div className="pl-bar">
+        <i style={{ width: `${loadPct}%` }} />
+      </div>
+      <span className="pl-text">
+        加载中，马上就好… <b>{Math.round(loadPct)}%</b>
+      </span>
+    </>
+  )
+
+  if (!contentReady || !exitArmed) {
+    return (
+      <div
+        className="main"
+        style={{ position: 'relative', display: 'flex', flex: 1, minHeight: 0 }}
+      >
+        <div className="psd-loading">{loaderInner}</div>
+      </div>
+    )
+  }
+
   return (
-    <div className="main" style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+    <div
+      className={`main detail${entered ? ' entered' : ''}`}
+      style={{ position: 'relative', display: 'flex', flex: 1, minHeight: 0 }}
+    >
+      {!loaderGone && (
+        <div
+          className={`psd-loading${entered ? ' leaving' : ''}`}
+          onAnimationEnd={(e) => {
+            if (e.target === e.currentTarget) setLoaderGone(true)
+          }}
+        >
+          {loaderInner}
+        </div>
+      )}
       <aside ref={leftRef} className={`panel panel-left${leftCollapsed ? ' collapsed' : ''}`}>
         <div className="panel-head">
           <span className="label">图 层</span>
@@ -829,7 +941,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         </span>
       </aside>
 
-      <div style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex' }}>
+      <div className="canvas-mid" style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex' }}>
         <CanvasView
           doc={doc}
           tree={tree}
@@ -1118,22 +1230,6 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
                 </button>
               </div>
             </div>
-          </div>
-        )}
-
-        {(loading || decoding) && (
-          <div
-            style={{
-              position: 'absolute', inset: 0, zIndex: 30,
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-              justifyContent: 'center',
-              background: 'rgba(10,10,12,0.55)', backdropFilter: 'blur(4px)'
-            }}
-          >
-            <div style={{ color: '#fff' }}>
-              <AppLogo animated size={46} />
-            </div>
-            <span style={{ fontSize: 12, color: '#fff', marginTop: 8 }}>加载中，马上就好…</span>
           </div>
         )}
       </div>

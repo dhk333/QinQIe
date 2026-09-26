@@ -22,6 +22,21 @@ const FolderSvg = (
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
   </svg>
 )
+const GridLayoutIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+    <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+    <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
+    <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
+    <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" />
+  </svg>
+)
+const StripLayoutIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+    <rect x="3" y="5" width="5.5" height="14" rx="1.5" />
+    <rect x="9.5" y="5" width="5" height="14" rx="1.5" />
+    <rect x="15.5" y="5" width="5.5" height="14" rx="1.5" />
+  </svg>
+)
 
 async function importPaths(paths: string[]): Promise<{ ok: ProjectPsd[]; failed: string[] }> {
   const results = (await window.api.importPsds(paths)) as Array<{
@@ -56,6 +71,13 @@ async function importPaths(paths: string[]): Promise<{ ok: ProjectPsd[]; failed:
 export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUpload }: Props) {
   const [selectedGroup, setSelectedGroup] = useState<string>('all')
   const [dragOverGrp, setDragOverGrp] = useState<string | null>(null)
+  const [grpCollapsed, setGrpCollapsed] = useState(false)
+  const [stripMode, setStripMode] = useState(() => localStorage.getItem('qc-art-layout') === 'strip')
+  const toggleLayout = () =>
+    setStripMode((v) => {
+      localStorage.setItem('qc-art-layout', v ? 'grid' : 'strip')
+      return !v
+    })
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set())
   const dialog = useDialog()
   const toast = useToast()
@@ -223,8 +245,8 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
   const grpClass = (g: string) => `grp${selectedGroup === g ? ' on' : ''}${dragOverGrp === g ? ' dragover' : ''}`
 
   return (
-    <div className="proj-body">
-      <aside className="group-panel">
+    <div className={`proj-body${grpCollapsed ? ' grp-collapsed' : ''}`}>
+      <aside className={`group-panel${grpCollapsed ? ' collapsed' : ''}`}>
         <span className={grpClass('all')} onClick={() => setSelectedGroup('all')}>
           {AllIcon}
           全部<span className="cnt">{cnt('all')}</span>
@@ -256,9 +278,28 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
         </span>
         <span className="grp-add" onClick={() => void handleAddGroup()}>＋ 新建分组</span>
       </aside>
+      <span
+        className="gp-chev"
+        title={grpCollapsed ? '展开分组栏' : '收起分组栏'}
+        onClick={() => setGrpCollapsed((v) => !v)}
+      >
+        {grpCollapsed ? '›' : '‹'}
+      </span>
+
+      <button
+        className="icon-btn art-layout-btn"
+        title={stripMode ? '切换为网格布局' : '切换为横向滚动布局'}
+        onClick={toggleLayout}
+      >
+        {stripMode ? GridLayoutIcon : StripLayoutIcon}
+      </button>
 
       <main
-        className="art-flow"
+        className={`art-flow${stripMode ? ' strip' : ''}`}
+        onWheel={(e) => {
+          if (stripMode && Math.abs(e.deltaY) > Math.abs(e.deltaX))
+            e.currentTarget.scrollLeft += e.deltaY
+        }}
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('Files')) e.preventDefault()
         }}
@@ -292,7 +333,13 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
             <div
               key={psd.id}
               className={`art-card${psd.missing ? ' missing' : ''}`}
-              style={{ width: Math.max(110, Math.min(420, Math.round(250 * (psd.w / Math.max(psd.h, 1))))) + 'px', animationDelay: `${Math.min(i * 40, 480)}ms` }}
+              style={{
+                width:
+                  (stripMode
+                    ? Math.round(560 * (psd.w / Math.max(psd.h, 1)))
+                    : Math.max(110, Math.min(420, Math.round(250 * (psd.w / Math.max(psd.h, 1)))))) + 'px',
+                animationDelay: `${Math.min(i * 40, 480)}ms`
+              }}
               draggable={!psd.missing}
               onDragStart={(e) => onCardDragStart(e, psd)}
               onClick={() => {
@@ -300,7 +347,7 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
                 else toast('文件丢失，请先重新定位', 'warning')
               }}
             >
-              <div className={`art-thumb${psd.missing ? ' missing' : ''}`} style={{ height: '250px' }}>
+              <div className={`art-thumb${psd.missing ? ' missing' : ''}`} style={{ height: stripMode ? '560px' : '250px' }}>
                 <PsdThumb thumbPath={psd.thumbPath} kind="thumb" />
                 <span className="ops">
                   <span title="重命名" onClick={(e) => { e.stopPropagation(); void handleRenamePsd(psd) }}>✎</span>

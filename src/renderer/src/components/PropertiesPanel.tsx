@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { ExportFormat, PsdDoc, PsdLayer } from '@/types'
-import { layerCssSnippet, sampleColor } from '@/lib/export'
-import { renderLayerCanvas } from '@/lib/psd'
+import { blendLabel, layerCssSnippet, layerEffectNames, sampleColor } from '@/lib/export'
+import { loadExportPrefs } from '@/lib/exportPrefs'
+import { indexRNodes, renderLayerCanvas } from '@/lib/psd'
 import type { RNode } from '@/lib/compositor'
 import { CheckIcon, CopyIcon } from './icons'
 import Slider from './Slider'
@@ -17,30 +18,82 @@ interface Props {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="border-b border-border px-4 py-3.5">
-      <h3 className="mb-2.5 text-[11px] font-medium uppercase tracking-wider text-txt-3">
-        {title}
-      </h3>
+    <section className="border-b border-border px-4 pb-4 pt-3.5">
+      <h3 className="mb-3 text-[12px] font-semibold tracking-normal text-txt">{title}</h3>
       {children}
-    </div>
+    </section>
   )
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between py-0.5">
-      <span className="text-[12px] text-txt-3">{label}</span>
-      <span className="text-[12px] text-txt">{value}</span>
+    <div className="flex items-center justify-between py-1">
+      <span className="text-[11.5px] text-txt-3">{label}</span>
+      <span className="pl-3 text-right text-[12px] text-txt">{value}</span>
+    </div>
+  )
+}
+
+const CSS_TOKEN_RE =
+  /(\/\*.*?\*\/)|('[^']*'|"[^"]*")|(#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\b)|([;:])/gi
+
+function valueTokens(raw: string): React.ReactNode[] {
+  const out: React.ReactNode[] = []
+  let last = 0
+  let k = 0
+  for (const m of raw.matchAll(CSS_TOKEN_RE)) {
+    const idx = m.index ?? 0
+    if (idx > last) out.push(<span key={k++}>{raw.slice(last, idx)}</span>)
+    if (m[1]) out.push(<span key={k++} className="tc">{m[1]}</span>)
+    else if (m[2]) out.push(<span key={k++} className="ts">{m[2]}</span>)
+    else if (m[3])
+      out.push(
+        <span key={k++} className="tv">
+          <i className="sw" style={{ background: m[3] }} />
+          {m[3]}
+        </span>
+      )
+    else out.push(<span key={k++} className="pu">{m[4]}</span>)
+    last = idx + m[0].length
+  }
+  if (last < raw.length) out.push(<span key={k++}>{raw.slice(last)}</span>)
+  return out
+}
+
+function CssCode({ css }: { css: string }) {
+  return (
+    <div className="css-hl">
+      {css.split('\n').map((ln, i) => {
+        const m = /^([a-z-]+)(:)([\s\S]*)$/i.exec(ln)
+        return (
+          <div className="cl" key={i}>
+            <span className="ln">{i + 1}</span>
+            <span className="ct">
+              {m ? (
+                <>
+                  <span className="pr">{m[1]}</span>
+                  <span className="pu">{m[2]}</span>
+                  <span className="tv">{valueTokens(m[3])}</span>
+                </>
+              ) : (
+                <span className="tv">{valueTokens(ln)}</span>
+              )}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }
 
 export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenIds, onExport }: Props) {
-  const [format, setFormat] = useState<ExportFormat>('png')
-  const [scale, setScale] = useState(2)
-  const [quality, setQuality] = useState(0.92)
+  const [format, setFormat] = useState<ExportFormat>(() => loadExportPrefs().format)
+  const [scale, setScale] = useState(() => loadExportPrefs().scales[0])
+  const [quality, setQuality] = useState(() => loadExportPrefs().quality)
   const [copied, setCopied] = useState<'css' | 'color' | 'text' | null>(null)
 
+  const rnodeMap = useMemo(() => indexRNodes(rnodes), [rnodes])
+  const rnode = layer ? rnodeMap.get(layer.id) : undefined
   const color = useMemo(
     () => {
       const c = layer ? canvasMap.get(layer.id) : undefined
@@ -48,7 +101,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
     },
     [layer, canvasMap]
   )
-  const css = useMemo(() => (layer ? layerCssSnippet(layer, color) : ''), [layer, color])
+  const css = useMemo(() => (layer ? layerCssSnippet(layer, color, rnode) : ''), [layer, color, rnode])
   const previewUrl = useMemo(() => {
     if (!layer || !doc) return null
     try {
@@ -63,7 +116,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
   if (!layer) {
     return (
       <aside className="flex w-full min-h-0 flex-1 flex-col bg-panel">
-        <div className="flex h-10 items-center border-b border-border px-4 text-[12px] font-medium text-txt-2">
+        <div className="flex h-10 shrink-0 items-center border-b border-border px-4 text-[12.5px] font-semibold text-txt">
           属性
         </div>
         <p className="px-4 py-6 text-center text-[12px] text-txt-3">
@@ -83,7 +136,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
 
   return (
     <aside className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto bg-panel">
-      <div className="flex h-10 items-center border-b border-border px-4 text-[12px] font-medium text-txt-2">
+      <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center border-b border-border bg-panel px-4 text-[12.5px] font-semibold text-txt">
         属性
       </div>
 
@@ -94,7 +147,17 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
         <InfoRow label="类型" value={typeLabel} />
         <InfoRow label="位置" value={`X ${layer.left}, Y ${layer.top}`} />
         <InfoRow label="尺寸" value={`${layer.width} × ${layer.height}`} />
-        <InfoRow label="透明度" value={`${Math.round(layer.opacity * 100)}%`} />
+        <InfoRow label="不透明度" value={`${Math.round(layer.opacity * 100)}%`} />
+        {rnode && rnode.fillOpacity < 0.999 && (
+          <InfoRow label="填充不透明度" value={`${Math.round(rnode.fillOpacity * 100)}%`} />
+        )}
+        <InfoRow label="混合模式" value={blendLabel(layer.blendMode)} />
+        {layer.clipping && <InfoRow label="剪贴蒙版" value="是" />}
+        {rnode?.mask && !rnode.mask.disabled && <InfoRow label="图层蒙版" value="有" />}
+        {layerEffectNames(rnode).length > 0 && (
+          <InfoRow label="图层样式" value={layerEffectNames(rnode).join('、')} />
+        )}
+        {layer.hidden && <InfoRow label="可见性" value="已隐藏" />}
       </Section>
 
       {color && (
@@ -137,8 +200,8 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
               <InfoRow label="字体大小" value={`${layer.textInfo.fontSize} px`} />
             )}
             {layer.textInfo.color && (
-              <div className="flex items-center justify-between py-0.5">
-                <span className="text-[12px] text-txt-3">字体颜色</span>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-[11.5px] text-txt-3">字体颜色</span>
                 <span
                   className="flex items-center gap-1.5 font-mono text-[11px] text-txt"
                   style={{ cursor: 'pointer' }}
@@ -154,6 +217,15 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
             )}
             {layer.textInfo.fontWeight && <InfoRow label="字重" value={layer.textInfo.fontWeight} />}
             {layer.textInfo.fontFamily && <InfoRow label="字体" value={layer.textInfo.fontFamily} />}
+            {layer.textInfo.leading != null && (
+              <InfoRow label="行距" value={`${Math.round(layer.textInfo.leading * 10) / 10} px`} />
+            )}
+            {layer.textInfo.tracking != null && layer.textInfo.tracking !== 0 && (
+              <InfoRow
+                label="字距"
+                value={`${Math.round(layer.textInfo.tracking) / 1000} em`}
+              />
+            )}
           </div>
         </Section>
       )}
@@ -171,9 +243,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
               <CopyIcon className="h-3.5 w-3.5" />
             )}
           </button>
-          <pre className="code-block overflow-x-auto p-3 pr-9 font-mono text-[11px] leading-5 text-txt-2">
-            {css}
-          </pre>
+          <CssCode css={css} />
         </div>
       </Section>
 

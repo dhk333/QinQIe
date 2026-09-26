@@ -64,7 +64,9 @@ function readTextInfo(text: unknown): PsdLayer['textInfo'] {
     fontSize: typeof st.fontSize === 'number' ? Math.round(st.fontSize) : undefined,
     color,
     fontFamily: fontName,
-    fontWeight: isBold ? 'bold' : 'normal'
+    fontWeight: isBold ? 'bold' : 'normal',
+    leading: typeof st.leading === 'number' ? st.leading : undefined,
+    tracking: typeof st.tracking === 'number' ? st.tracking : undefined
   }
 }
 
