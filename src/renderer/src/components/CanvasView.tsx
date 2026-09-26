@@ -157,6 +157,8 @@ export default function CanvasView({
   const [zoom, setZoom] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [drawingRect, setDrawingRect] = useState<DrawRect | null>(null)
+  /** 选择工具下已选中时，悬停的其它图层 id（用于中心距测量） */
+  const [hoverId, setHoverId] = useState<number | null>(null)
   const lastFitDoc = useRef<string>('')
   const drag = useRef<DragState | null>(null)
   /** 整篇合成结果：只在图层内容/显隐变化时重建，平移缩放只搬运这张图 */
@@ -306,6 +308,52 @@ export default function CanvasView({
       }
     }
 
+    // 选中图层中心 → 悬停图层的距离测量
+    if (tool === 'move' && selectedIds.size > 0 && hoverId !== null && !selectedIds.has(hoverId)) {
+      const layers = flattenLayers(tree)
+      const hov = layers.find((l) => l.id === hoverId)
+      const sel = layers.filter((l) => selectedIds.has(l.id))
+      if (hov && sel.length) {
+        let x0 = Infinity
+        let y0 = Infinity
+        let x1 = -Infinity
+        let y1 = -Infinity
+        for (const l of sel) {
+          x0 = Math.min(x0, l.left)
+          y0 = Math.min(y0, l.top)
+          x1 = Math.max(x1, l.left + l.width)
+          y1 = Math.max(y1, l.top + l.height)
+        }
+        const cx = (x0 + x1) / 2
+        const cy = (y0 + y1) / 2
+        const px = Math.max(hov.left, Math.min(cx, hov.left + hov.width))
+        const py = Math.max(hov.top, Math.min(cy, hov.top + hov.height))
+        const X = (v: number): number => offset.x + v * zoom
+        const Y = (v: number): number => offset.y + v * zoom
+        ctx.strokeStyle = accent2
+        ctx.lineWidth = 1
+        ctx.setLineDash([5, 4])
+        ctx.strokeRect(X(hov.left) - 0.5, Y(hov.top) - 0.5, hov.width * zoom + 1, hov.height * zoom + 1)
+        ctx.beginPath()
+        ctx.moveTo(X(cx), Y(cy))
+        ctx.lineTo(X(px), Y(py))
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.fillStyle = accent2
+        ctx.beginPath()
+        ctx.arc(X(cx), Y(cy), 3, 0, Math.PI * 2)
+        ctx.fill()
+        const label = String(Math.round(Math.hypot(px - cx, py - cy)))
+        ctx.font = '11px Consolas, monospace'
+        const tw = ctx.measureText(label).width + 10
+        const mx2 = (X(cx) + X(px)) / 2
+        const my2 = (Y(cy) + Y(py)) / 2
+        ctx.fillRect(mx2 - tw / 2, my2 - 9, tw, 18)
+        ctx.fillStyle = '#fff'
+        ctx.fillText(label, mx2 - tw / 2 + 5, my2 + 4)
+      }
+    }
+
     // 切片
     if (showSlices) {
       const singleSelected =
@@ -365,7 +413,7 @@ export default function CanvasView({
         ctx.setLineDash([])
       }
     }
-  }, [doc, tree, rnodes, canvasMap, hiddenIds, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect])
+  }, [doc, tree, rnodes, canvasMap, hiddenIds, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId])
 
   // 滚轮缩放
   useEffect(() => {
@@ -551,6 +599,14 @@ export default function CanvasView({
           el.style.cursor = tool === 'hand' ? 'grab' : 'default'
         }
       }
+      // 选择工具 + 已有选中：跟踪悬停图层做中心距测量
+      if (tool === 'move' && selectedIds.size > 0 && !spaceActive) {
+        const hit = hitLayer(mx, my)
+        const id = hit && !selectedIds.has(hit.id) ? hit.id : null
+        setHoverId((prev) => (prev === id ? prev : id))
+      } else {
+        setHoverId((prev) => (prev === null ? prev : null))
+      }
       return
     }
     const docCur = { x: (mx - offset.x) / zoom, y: (my - offset.y) / zoom }
@@ -658,6 +714,7 @@ export default function CanvasView({
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
+      onMouseLeave={() => setHoverId(null)}
       onContextMenu={onContextMenu}
       style={{ cursor }}
     >
