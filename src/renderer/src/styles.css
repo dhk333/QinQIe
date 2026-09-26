@@ -298,7 +298,7 @@ body {
   background: transparent; color: var(--txt-2);
   cursor: pointer; transition: all 0.2s ease;
 }
-.theme-toggle:hover { color: var(--accent-2); border-color: var(--accent); transform: rotate(15deg); }
+.theme-toggle:hover { color: var(--accent-2); border-color: var(--accent); }
 .theme-toggle svg { width: 15px; height: 15px; }
 .theme-toggle .icon-sun { display: none; }
 body.dark .theme-toggle .icon-sun { display: block; }
