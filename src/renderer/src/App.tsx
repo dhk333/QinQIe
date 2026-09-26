@@ -3,26 +3,43 @@ import type { Project } from '@/types'
 import { createProject, genId, loadProjectsData, saveProjectsData } from '@/lib/projects'
 import { useDialog, useToast } from '@/lib/ui'
 import { useHashRoute, navigate } from '@/lib/router'
+import { applyTheme, loadTheme } from '@/lib/themes'
+import { applyFontSize, loadFontSize, type FontSizeId } from '@/lib/uiFont'
 import HomePage from '@/pages/HomePage'
 import ProjectPage from '@/pages/ProjectPage'
 import DetailPage from '@/pages/DetailPage'
 import ChangelogPage from '@/pages/ChangelogPage'
-import { BackIcon, CaretDownIcon, HistoryIcon, MoonIcon, PlusIcon, SunIcon, UploadIcon } from '@/components/icons'
+import SettingsPage from '@/pages/SettingsPage'
+import ShortcutsOverlay from '@/components/ShortcutsOverlay'
+import AppLogo from '@/components/AppLogo'
+import { BackIcon, CaretDownIcon, GearIcon, PlusIcon, UploadIcon } from '@/components/icons'
 
 export default function App() {
   const hash = useHashRoute()
   const [projects, setProjects] = useState<Project[] | null>(null)
-  const [dark, setDark] = useState(false)
+  const [theme, setTheme] = useState<string>(loadTheme)
+  const [fontSize, setFontSize] = useState<FontSizeId>(loadFontSize)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [changelogFrom, setChangelogFrom] = useState('#/home')
+  const [settingsFrom, setSettingsFrom] = useState('#/home')
   const dialog = useDialog()
   const toast = useToast()
   const uploadRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    document.body.classList.toggle('dark', dark)
-  }, [dark])
+    applyTheme(theme)
+  }, [theme])
+
+  useEffect(() => {
+    applyFontSize(fontSize)
+  }, [fontSize])
+
+  useEffect(() => {
+    const toggle = () => setShortcutsOpen((v) => !v)
+    window.addEventListener('qingqie:shortcuts', toggle)
+    return () => window.removeEventListener('qingqie:shortcuts', toggle)
+  }, [])
 
   useEffect(() => {
     loadProjectsData().then(setProjects)
@@ -56,7 +73,9 @@ export default function App() {
         })()
       : hash === '#/changelog'
         ? ({ name: 'changelog' } as const)
-        : ({ name: 'home' } as const)
+        : hash === '#/settings'
+          ? ({ name: 'settings' } as const)
+          : ({ name: 'home' } as const)
 
   const currentProject =
     (route.name === 'project' || route.name === 'detail') && projects
@@ -87,11 +106,6 @@ export default function App() {
     uploadRef.current()
   }
 
-  const openChangelog = () => {
-    setChangelogFrom(hash === '#/changelog' ? '#/home' : hash)
-    navigate('#/changelog')
-  }
-
   const loading = projects === null
 
   return (
@@ -103,7 +117,8 @@ export default function App() {
               className="back-btn"
               title="返回"
               onClick={() => {
-                if (route.name === 'changelog') navigate(changelogFrom)
+                if (route.name === 'changelog') navigate('#/settings')
+                else if (route.name === 'settings') navigate(settingsFrom)
                 else if (route.name === 'detail' && currentProject) navigate(`#/project/${currentProject.id}`)
                 else navigate('#/home')
               }}
@@ -112,12 +127,7 @@ export default function App() {
             </span>
           )}
           <div className="logo">
-            <svg viewBox="100 24 168 214" width="19" height="25" fill="none">
-              <path d="M156.6,181v50.3c0,6.4-7,10.3-12.4,7l-33.3-20c-5.3-3.2-8.5-8.9-8.5-15.1V98c0-6.4,7-10.3,12.5-7l41.6,25.4L116,156.8L156.6,181z" fill="#2945be" />
-              <path d="M178.6,116.2h-22V65.7c0-6.4,7-10.3,12.5-7l41.8,25.6L178.6,116.2z" fill="#4b6be4" />
-              <path d="M188.8,148.5h22v50.6c0,6.4-7,10.3-12.4,7L156.6,181L188.8,148.5z" fill="#4b6be4" />
-              <path d="M265.1,61.9v105c0,6.4-7,10.3-12.4,7l-41.9-25.1v-0.3l40.2-40.2l-40.2-24V33.4c0-6.4,7-10.3,12.5-7l33.4,20.4C261.9,50,265.1,55.7,265.1,61.9z" fill="#b0c3eb" />
-            </svg>
+            <AppLogo size={25} />
           </div>
           <span className="name">轻切</span>
         </div>
@@ -199,16 +209,15 @@ export default function App() {
           </button>
         )}
 
-        {route.name !== 'changelog' && (
-          <button className="btn btn-secondary" title="查看版本更新记录" onClick={openChangelog}>
-            <HistoryIcon />
-            更新记录
-          </button>
-        )}
-
-        <button className="theme-toggle" title="切换亮色 / 暗色主题" onClick={() => setDark((v) => !v)}>
-          <MoonIcon className="icon-moon" />
-          <SunIcon className="icon-sun" />
+        <button
+          className="theme-toggle"
+          title="设置"
+          onClick={() => {
+            setSettingsFrom(hash === '#/settings' ? '#/home' : hash)
+            navigate('#/settings')
+          }}
+        >
+          <GearIcon />
         </button>
 
         <div className="win-controls">
@@ -270,11 +279,21 @@ export default function App() {
             />
           )}
           {route.name === 'changelog' && <ChangelogPage />}
+          {route.name === 'settings' && (
+            <SettingsPage
+              theme={theme}
+              onThemeChange={setTheme}
+              fontSize={fontSize}
+              onFontSizeChange={setFontSize}
+            />
+          )}
           {route.name === 'project' && !currentProject && (
             <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--txt-3)' }}>项目不存在</div>
           )}
         </div>
       )}
+
+      {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
     </div>
   )
 }

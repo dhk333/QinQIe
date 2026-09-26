@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { PsdLayer } from '@/types'
 import {
   ChevronDownIcon,
@@ -141,18 +141,48 @@ function Row({
   )
 }
 
-export default function LayerTree({
-  tree,
-  hiddenIds,
-  selectedId,
-  selectedIds,
-  onSelect,
-  onToggleHidden,
-  onContextMenu
-}: Props) {
+export interface LayerTreeApi {
+  focusSearch: () => void
+  /** 在「全部收起」与「全部展开」之间切换 */
+  toggleCollapseAll: () => void
+}
+
+const LayerTree = forwardRef<LayerTreeApi, Props>(function LayerTree(
+  {
+    tree,
+    hiddenIds,
+    selectedId,
+    selectedIds,
+    onSelect,
+    onToggleHidden,
+    onContextMenu
+  },
+  ref
+) {
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   const listRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const allGroupIds = useMemo(() => {
+    const ids: number[] = []
+    const walk = (nodes: PsdLayer[]) => {
+      for (const n of nodes) {
+        if (n.children) {
+          ids.push(n.id)
+          walk(n.children)
+        }
+      }
+    }
+    walk(tree)
+    return ids
+  }, [tree])
+
+  useImperativeHandle(ref, () => ({
+    focusSearch: () => searchRef.current?.focus(),
+    toggleCollapseAll: () => {
+      setCollapsed((prev) => (prev.size > 0 ? new Set() : new Set(allGroupIds)))
+    }
+  }), [allGroupIds])
 
   // 外部（画布点击）选中时：展开祖先分组并滚动到可见
   useEffect(() => {
@@ -204,6 +234,7 @@ export default function LayerTree({
         <div className="flex items-center gap-1.5 rounded-md bg-panel-2 px-2 py-1.5">
           <SearchIcon className="h-3.5 w-3.5 shrink-0 text-txt-3" />
           <input
+            ref={searchRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索图层…"
@@ -236,4 +267,6 @@ export default function LayerTree({
       </div>
     </aside>
   )
-}
+})
+
+export default LayerTree

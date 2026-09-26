@@ -8,6 +8,8 @@ export type CanvasTool = 'move' | 'slice' | 'picker' | 'hand'
 export interface CanvasViewApi {
   fit: () => void
   applyZoom: (target: number) => void
+  /** 缩放到指定文档坐标区域（留边距并居中） */
+  zoomTo: (rect: { x: number; y: number; w: number; h: number }) => void
   getZoom: () => number
 }
 
@@ -28,6 +30,8 @@ interface Props {
   showSlices: boolean
   onCreateSlice: (rect: { x: number; y: number; w: number; h: number }) => void
   onSelectSlice: (id: string | null, additive?: boolean) => void
+  /** Alt+拖拽复制：克隆指定切片并返回新切片（已偏移、已选中），由外部完成创建 */
+  onDupSlice: (id: string) => { id: string; rect: { x: number; y: number; w: number; h: number } } | null
   onPickColor: (hex: string) => void
   onUpdateSlice: (id: string, rect: { x: number; y: number; w: number; h: number }) => void
   onDeleteSlice: (id: string) => void
@@ -142,6 +146,7 @@ export default function CanvasView({
   showSlices,
   onCreateSlice,
   onSelectSlice,
+  onDupSlice,
   onPickColor,
   onUpdateSlice,
   onDeleteSlice
@@ -196,11 +201,47 @@ export default function CanvasView({
     [size.w, size.h]
   )
 
+  const zoomTo = useCallback(
+    (rect: { x: number; y: number; w: number; h: number }) => {
+      if (size.w === 0 || size.h === 0 || rect.w <= 0 || rect.h <= 0) return
+      const z = Math.max(0.02, Math.min(8, Math.min((size.w - 120) / rect.w, (size.h - 120) / rect.h)))
+      setZoom(z)
+      setOffset({ x: (size.w - rect.w * z) / 2 - rect.x * z, y: (size.h - rect.h * z) / 2 - rect.y * z })
+    },
+    [size.w, size.h]
+  )
+
+  // Space 按住 = 临时抓手（MasterGo/Figma 范式），松开恢复原工具
+  const spaceRef = useRef(false)
+  const [spaceActive, setSpaceActive] = useState(false)
+  useEffect(() => {
+    const editable = (t: EventTarget | null) =>
+      t instanceof HTMLElement &&
+      (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat || editable(e.target)) return
+      spaceRef.current = true
+      setSpaceActive(true)
+      e.preventDefault()
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return
+      spaceRef.current = false
+      setSpaceActive(false)
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
+  }, [])
+
   useEffect(() => {
     onZoomChange?.(Math.round(zoom * 100))
   }, [zoom, onZoomChange])
 
-  useImperativeHandle(apiRef, () => ({ fit, applyZoom, getZoom: () => zoom }), [fit, applyZoom, zoom])
+  useImperativeHandle(apiRef, () => ({ fit, applyZoom, zoomTo, getZoom: () => zoom }), [fit, applyZoom, zoomTo, zoom])
 
   // 绘制
   useEffect(() => {
@@ -442,6 +483,10 @@ export default function CanvasView({
     const rect = containerRef.current!.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
+    if (spaceRef.current) {
+      drag.current = { mode: 'pan', startX: mx, startY: my, originX: offset.x, originY: offset.y, moved: false }
+      return
+    }
     if (tool === 'slice') {
       // 删除按钮优先
       for (let i = slices.length - 1; i >= 0; i--) {
@@ -466,6 +511,16 @@ export default function CanvasView({
       }
       const hit = hitSlice(mx, my)
       if (hit) {
+        if (e.altKey) {
+          const dup = onDupSlice(hit.id)
+          if (dup) {
+            drag.current = {
+              mode: 'move', startX: mx, startY: my, originX: offset.x, originY: offset.y,
+              moved: false, sliceId: dup.id, docStart, origRect: dup.rect
+            }
+            return
+          }
+        }
         drag.current = {
           mode: 'move', startX: mx, startY: my, originX: offset.x, originY: offset.y,
           moved: false, sliceId: hit.id, docStart, origRect: { ...hit }
@@ -487,7 +542,9 @@ export default function CanvasView({
       // 悬停光标
       const el = containerRef.current
       if (el) {
-        if (tool === 'slice') {
+        if (spaceActive) {
+          el.style.cursor = 'grab'
+        } else if (tool === 'slice') {
           const onBadge = slices.some((s) => hitDeleteBadge(mx, my, s))
           el.style.cursor = onBadge ? 'pointer' : 'crosshair'
         } else {
@@ -568,7 +625,7 @@ export default function CanvasView({
     if (!d.moved && d.sliceId) onSelectSlice(d.sliceId, e.shiftKey || e.ctrlKey || e.metaKey)
   }
 
-  const cursor = tool === 'slice' ? 'crosshair' : tool === 'hand' ? 'grab' : 'default'
+  const cursor = spaceActive ? 'grab' : tool === 'slice' ? 'crosshair' : tool === 'hand' ? 'grab' : 'default'
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()

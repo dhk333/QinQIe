@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 
 export interface MenuItem {
   label?: string
+  /** 右侧对齐的快捷键提示，如 'Ctrl+Shift+E' */
+  hint?: string
   danger?: boolean
   onClick?: () => void
 }
@@ -63,7 +65,10 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
               onClose()
             }}
           >
-            {it.label}
+            <span className="ctx-row">
+              {it.label}
+              {it.hint && <kbd className="kbd">{it.hint}</kbd>}
+            </span>
           </div>
         ) : (
           <div key={i} className="ctx-sep" />

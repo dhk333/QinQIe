@@ -9,10 +9,12 @@ import {
   renderLayerCanvas
 } from '@/lib/psd'
 import { exportCanvasBytes } from '@/lib/export'
+import { matchCommand, effectiveDisplay, COMMAND_MAP } from '@shared/keymap'
 import { useDialog, useToast } from '@/lib/ui'
-import LayerTree from '@/components/LayerTree'
+import LayerTree, { type LayerTreeApi } from '@/components/LayerTree'
 import CanvasView, { type CanvasTool, type CanvasViewApi } from '@/components/CanvasView'
 import ContextMenu from '@/components/ContextMenu'
+import AppLogo from '@/components/AppLogo'
 import PropertiesPanel from '@/components/PropertiesPanel'
 import {
   EyeIcon,
@@ -77,6 +79,9 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const [batchQuality, setBatchQuality] = useState(0.92)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const cancelRef = useRef(false)
+  const layerTreeRef = useRef<LayerTreeApi>(null)
+  const sliceNameRef = useRef<HTMLInputElement>(null)
+  const commandRef = useRef<(id: string) => void>(() => {})
   const toast = useToast()
   const dialog = useDialog()
 
@@ -546,41 +551,58 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     return [
       {
         label: `导出所选 ${nodes.length} 个图层…`,
+        hint: effectiveDisplay(COMMAND_MAP['export.batch']),
         onClick: () =>
           void exportNodes(nodes, batchFmt, [...batchScales], batchFmt === 'png' ? undefined : batchQuality)
       },
+      {},
       { label: '从图层创建切片', onClick: () => createSlicesFromNodes(nodes) },
+      {},
       { label: '隔离显示', onClick: () => isolateNodes(nodes) },
-      { label: '显示全部图层', onClick: () => setHiddenIds(new Set()) }
+      { label: '显示全部图层', hint: effectiveDisplay(COMMAND_MAP['layer.hide']), onClick: () => setHiddenIds(new Set()) }
     ]
   })()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        if (e.shiftKey) redoSlices()
-        else undoSlices()
+      const t = e.target as HTMLElement | null
+      const editable = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+      if (editable) {
+        if (e.key === 'Escape') t!.blur()
         return
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
-        e.preventDefault()
-        redoSlices()
+      // 方向键微调所选切片（MasterGo 范式：1px，Shift 为 10px）
+      if (e.key.startsWith('Arrow') && selectedSliceIds.size > 0) {
+        const step = e.shiftKey ? 10 : 1
+        const d: Record<string, [number, number]> = {
+          ArrowLeft: [-step, 0],
+          ArrowRight: [step, 0],
+          ArrowUp: [0, -step],
+          ArrowDown: [0, step]
+        }
+        const mv = d[e.key]
+        if (mv) {
+          e.preventDefault()
+          setSlices((prev) =>
+            prev.map((s) => (selectedSliceIds.has(s.id) ? { ...s, x: s.x + mv[0], y: s.y + mv[1] } : s))
+          )
+        }
         return
       }
-      const map: Record<string, CanvasTool> = { v: 'move', c: 'slice', i: 'picker', h: 'hand' }
-      const t = map[e.key.toLowerCase()]
-      if (t && !e.ctrlKey && !e.metaKey) setTool(t)
-      if (e.key === 'Escape') setSelectedSliceIds(new Set())
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedSliceIds.size > 0) {
-        setSlices((prev) => prev.filter((s) => !selectedSliceIds.has(s.id)))
-        setSelectedSliceIds(new Set())
-      }
+      const cmd = matchCommand(e)
+      if (!cmd) return
+      e.preventDefault()
+      commandRef.current(cmd.id)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [selectedSliceIds, setSlices, undoSlices, redoSlices])
+  }, [selectedSliceIds, setSlices])
+
+  // 原生菜单点击 → 与键盘同一个命令分发入口
+  useEffect(() => {
+    const off = window.api.onMenuExec((id) => commandRef.current(id))
+    return off
+  }, [])
 
   const exportSlices = useCallback(
     async (format: ExportFormat, scales0: number[], quality?: number) => {
@@ -637,6 +659,145 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     else void exportAll(batchFmt, scales, quality)
   }
 
+  const cloneSlices = (ids: Set<string>, dx: number, dy: number): DocSlice[] => {
+    const dups: DocSlice[] = []
+    for (const s of slices) {
+      if (!ids.has(s.id)) continue
+      const no = String(sliceSeq.current++).padStart(2, '0')
+      dups.push({ ...s, id: `slice-${no}-${Date.now()}`, no, x: s.x + dx, y: s.y + dy })
+    }
+    if (dups.length) {
+      setSlices((prev) => [...prev, ...dups])
+      setSelectedSliceIds(new Set(dups.map((d) => d.id)))
+    }
+    return dups
+  }
+
+  // Alt+拖拽复制：先落一个偏移副本，画布随即拖动这个副本
+  const handleDupSlice = (id: string) => {
+    const src = slices.find((s) => s.id === id)
+    if (!src) return null
+    const [dup] = cloneSlices(new Set([id]), 16, 16)
+    return dup ? { id: dup.id, rect: { x: dup.x, y: dup.y, w: dup.w, h: dup.h } } : null
+  }
+
+  // 统一命令入口：键盘、原生菜单、（后续）工具栏按钮共用，保证行为一致
+  commandRef.current = (id: string) => {
+    const api = canvasApiRef.current
+    switch (id) {
+      case 'tool.move':
+        setTool('move')
+        break
+      case 'tool.slice':
+        setTool('slice')
+        break
+      case 'tool.picker':
+        setTool('picker')
+        break
+      case 'tool.hand':
+        setTool('hand')
+        break
+      case 'view.zoomIn':
+        if (api) api.applyZoom(api.getZoom() * 1.2)
+        break
+      case 'view.zoomOut':
+        if (api) api.applyZoom(api.getZoom() / 1.2)
+        break
+      case 'view.zoom100':
+        api?.applyZoom(1)
+        break
+      case 'view.fit':
+        api?.fit()
+        break
+      case 'view.zoomSel': {
+        if (!api) break
+        let boxes: { x: number; y: number; w: number; h: number }[] = []
+        if (selectedSliceIds.size > 0) {
+          boxes = slices.filter((s) => selectedSliceIds.has(s.id))
+        } else if (selectedIds.size > 0) {
+          boxes = [...selectedIds]
+            .map((lid) => findInTree(tree, lid))
+            .filter((n): n is PsdLayer => !!n && n.width > 0 && n.height > 0)
+            .map((n) => ({ x: n.left, y: n.top, w: n.width, h: n.height }))
+        }
+        if (!boxes.length) {
+          api.fit()
+          break
+        }
+        const x0 = Math.min(...boxes.map((b) => b.x))
+        const y0 = Math.min(...boxes.map((b) => b.y))
+        const x1 = Math.max(...boxes.map((b) => b.x + b.w))
+        const y1 = Math.max(...boxes.map((b) => b.y + b.h))
+        api.zoomTo({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 })
+        break
+      }
+      case 'view.slices':
+        setShowSlices((v) => !v)
+        break
+      case 'sel.all':
+        if (tool === 'slice') {
+          setSelectedSliceIds(new Set(slices.map((s) => s.id)))
+        } else {
+          const vis = flattenLayers(tree).filter((n) => n.type === 'layer' && !n.hidden && !hiddenIds.has(n.id))
+          setSelectedIds(new Set(vis.map((n) => n.id)))
+        }
+        break
+      case 'sel.clear':
+        if (tool !== 'move') setTool('move')
+        else {
+          setSelectedSliceIds(new Set())
+          clearLayerSel()
+        }
+        break
+      case 'sel.delete':
+        deleteSelectedSlices()
+        break
+      case 'edit.undo':
+        undoSlices()
+        break
+      case 'edit.redo':
+        redoSlices()
+        break
+      case 'slice.rename':
+        if (selectedSlice) {
+          setTool('slice')
+          requestAnimationFrame(() => {
+            sliceNameRef.current?.focus()
+            sliceNameRef.current?.select()
+          })
+        }
+        break
+      case 'slice.dup':
+        if (selectedSliceIds.size > 0) cloneSlices(selectedSliceIds, 16, 16)
+        break
+      case 'layer.hide':
+        selectedIds.forEach((lid) => toggleHidden(lid))
+        break
+      case 'layer.collapse':
+        layerTreeRef.current?.toggleCollapseAll()
+        break
+      case 'export.batch':
+        runBatchExport()
+        break
+      case 'panel.toggle':
+        if (!leftCollapsed && !rightCollapsed) {
+          toggleLeft()
+          toggleRight()
+        } else {
+          if (leftCollapsed) toggleLeft()
+          if (rightCollapsed) toggleRight()
+        }
+        break
+      case 'search.focus':
+        if (leftCollapsed) toggleLeft()
+        layerTreeRef.current?.focusSearch()
+        break
+      case 'help.toggle':
+        window.dispatchEvent(new Event('qingqie:shortcuts'))
+        break
+    }
+  }
+
   return (
     <div className="main" style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       <aside ref={leftRef} className={`panel panel-left${leftCollapsed ? ' collapsed' : ''}`}>
@@ -645,6 +806,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           <span className="count">{layerCount}</span>
         </div>
         <LayerTree
+          ref={layerTreeRef}
           tree={tree}
           hiddenIds={hiddenIds}
           selectedId={selectedId}
@@ -679,6 +841,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           showSlices={showSlices}
           onCreateSlice={handleCreateSlice}
           onSelectSlice={handleSelectSlice}
+          onDupSlice={handleDupSlice}
           onPickColor={handlePickColor}
           onUpdateSlice={handleUpdateSlice}
           onDeleteSlice={(id) => {
@@ -701,6 +864,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
               {selectedSlice && (
                 <span className="slice-editor">
                   <input
+                    ref={sliceNameRef}
                     className="slice-name"
                     type="text"
                     placeholder={`切片${selectedSlice.no}`}
@@ -848,7 +1012,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           </span>
           <span
             className={`zb${tool === 'slice' ? ' active' : ''}`}
-            title="切片工具 (C) — 拖拽画切片"
+            title="切片工具 (S) — 拖拽画切片"
             onClick={() => setTool('slice')}
           >
             <SliceIcon />
@@ -918,11 +1082,19 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             <ZoomInIcon />
           </span>
           <span className="sep" />
-          <span className="zb" title="适应窗口" onClick={() => canvasApiRef.current?.fit()}>
+          <span className="zb" title="适应画布 (Shift+1)" onClick={() => canvasApiRef.current?.fit()}>
             <FitIcon />
           </span>
-          <span className="zb" title="100%" onClick={() => canvasApiRef.current?.applyZoom(1)}>
+          <span className="zb" title="缩放至 100% (Ctrl+0)" onClick={() => canvasApiRef.current?.applyZoom(1)}>
             <span style={{ fontFamily: 'Consolas, monospace', fontSize: 9 }}>1:1</span>
+          </span>
+          <span className="sep" />
+          <span
+            className="zb"
+            title="快捷键一览 (?)"
+            onClick={() => window.dispatchEvent(new Event('qingqie:shortcuts'))}
+          >
+            <span style={{ fontFamily: 'Consolas, monospace', fontSize: 12, fontWeight: 600 }}>?</span>
           </span>
         </div>
 
@@ -953,19 +1125,10 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
               background: 'rgba(10,10,12,0.55)', backdropFilter: 'blur(4px)'
             }}
           >
-            <svg className="logo-draw" viewBox="0 0 352 381" width="63" height="69" fill="none" style={{ color: '#fff' }}>
-              <path
-                pathLength={1}
-                d="M156.6,181v50.3c0,6.4-7,10.3-12.4,7l-33.3-20c-5.3-3.2-8.5-8.9-8.5-15.1V98c0-6.4,7-10.3,12.5-7l41.6,25.4L116,156.8L156.6,181z"
-              />
-              <path pathLength={1} d="M178.6,116.2h-22V65.7c0-6.4,7-10.3,12.5-7l41.8,25.6L178.6,116.2z" />
-              <path pathLength={1} d="M188.8,148.5h22v50.6c0,6.4-7,10.3-12.4,7L156.6,181L188.8,148.5z" />
-              <path
-                pathLength={1}
-                d="M265.1,61.9v105c0,6.4-7,10.3-12.4,7l-41.9-25.1v-0.3l40.2-40.2l-40.2-24V33.4c0-6.4,7-10.3,12.5-7l33.4,20.4C261.9,50,265.1,55.7,265.1,61.9z"
-              />
-            </svg>
-            <span style={{ fontSize: 12, color: '#fff' }}>正在解析 PSD…</span>
+            <div style={{ color: '#fff' }}>
+              <AppLogo animated size={46} />
+            </div>
+            <span style={{ fontSize: 12, color: '#fff', marginTop: 8 }}>正在解析 PSD…</span>
           </div>
         )}
       </div>
