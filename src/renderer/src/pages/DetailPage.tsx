@@ -1128,7 +1128,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             <div style={{ color: '#fff' }}>
               <AppLogo animated size={46} />
             </div>
-            <span style={{ fontSize: 12, color: '#fff', marginTop: 8 }}>正在解析 PSD…</span>
+            <span style={{ fontSize: 12, color: '#fff', marginTop: 8 }}>加载中，马上就好…</span>
           </div>
         )}
       </div>
