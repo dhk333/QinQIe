@@ -308,49 +308,93 @@ export default function CanvasView({
       }
     }
 
-    // 选中图层中心 → 悬停图层的距离测量
+    // Figma 式间距：选中图层包围盒 ↔ 悬停图层，边到边的水平/垂直间隙
     if (tool === 'move' && selectedIds.size > 0 && hoverId !== null && !selectedIds.has(hoverId)) {
       const layers = flattenLayers(tree)
       const hov = layers.find((l) => l.id === hoverId)
       const sel = layers.filter((l) => selectedIds.has(l.id))
       if (hov && sel.length) {
-        let x0 = Infinity
-        let y0 = Infinity
-        let x1 = -Infinity
-        let y1 = -Infinity
+        let ax0 = Infinity
+        let ay0 = Infinity
+        let ax1 = -Infinity
+        let ay1 = -Infinity
         for (const l of sel) {
-          x0 = Math.min(x0, l.left)
-          y0 = Math.min(y0, l.top)
-          x1 = Math.max(x1, l.left + l.width)
-          y1 = Math.max(y1, l.top + l.height)
+          ax0 = Math.min(ax0, l.left)
+          ay0 = Math.min(ay0, l.top)
+          ax1 = Math.max(ax1, l.left + l.width)
+          ay1 = Math.max(ay1, l.top + l.height)
         }
-        const cx = (x0 + x1) / 2
-        const cy = (y0 + y1) / 2
-        const px = Math.max(hov.left, Math.min(cx, hov.left + hov.width))
-        const py = Math.max(hov.top, Math.min(cy, hov.top + hov.height))
+        const bx0 = hov.left
+        const by0 = hov.top
+        const bx1 = hov.left + hov.width
+        const by1 = hov.top + hov.height
         const X = (v: number): number => offset.x + v * zoom
         const Y = (v: number): number => offset.y + v * zoom
+        const gap = (a0: number, a1: number, b0: number, b1: number): number | null =>
+          b0 >= a1 ? b0 - a1 : a0 >= b1 ? a0 - b1 : null
+        const gx = gap(ax0, ax1, bx0, bx1)
+        const gy = gap(ay0, ay1, by0, by1)
         ctx.strokeStyle = accent2
         ctx.lineWidth = 1
         ctx.setLineDash([5, 4])
-        ctx.strokeRect(X(hov.left) - 0.5, Y(hov.top) - 0.5, hov.width * zoom + 1, hov.height * zoom + 1)
-        ctx.beginPath()
-        ctx.moveTo(X(cx), Y(cy))
-        ctx.lineTo(X(px), Y(py))
-        ctx.stroke()
+        ctx.strokeRect(X(ax0) - 0.5, Y(ay0) - 0.5, (ax1 - ax0) * zoom + 1, (ay1 - ay0) * zoom + 1)
+        ctx.strokeRect(X(bx0) - 0.5, Y(by0) - 0.5, (bx1 - bx0) * zoom + 1, (by1 - by0) * zoom + 1)
         ctx.setLineDash([])
-        ctx.fillStyle = accent2
-        ctx.beginPath()
-        ctx.arc(X(cx), Y(cy), 3, 0, Math.PI * 2)
-        ctx.fill()
-        const label = String(Math.round(Math.hypot(px - cx, py - cy)))
-        ctx.font = '11px Consolas, monospace'
-        const tw = ctx.measureText(label).width + 10
-        const mx2 = (X(cx) + X(px)) / 2
-        const my2 = (Y(cy) + Y(py)) / 2
-        ctx.fillRect(mx2 - tw / 2, my2 - 9, tw, 18)
-        ctx.fillStyle = '#fff'
-        ctx.fillText(label, mx2 - tw / 2 + 5, my2 + 4)
+        const measure = (
+          sx: number,
+          sy: number,
+          ex: number,
+          ey: number,
+          val: number,
+          horizontal: boolean
+        ): void => {
+          ctx.beginPath()
+          ctx.moveTo(sx, sy)
+          ctx.lineTo(ex, ey)
+          ctx.stroke()
+          // 两端垂直短刻度
+          ctx.beginPath()
+          for (const [px, py] of [
+            [sx, sy],
+            [ex, ey]
+          ]) {
+            if (horizontal) {
+              ctx.moveTo(px, py - 3)
+              ctx.lineTo(px, py + 3)
+            } else {
+              ctx.moveTo(px - 3, py)
+              ctx.lineTo(px + 3, py)
+            }
+          }
+          ctx.stroke()
+          const label = String(Math.round(val))
+          ctx.font = '11px Consolas, monospace'
+          const tw = ctx.measureText(label).width + 10
+          const cx = (sx + ex) / 2
+          const cy = (sy + ey) / 2
+          ctx.fillStyle = accent2
+          ctx.fillRect(cx - tw / 2, cy - 9, tw, 18)
+          ctx.fillStyle = '#fff'
+          ctx.fillText(label, cx - tw / 2 + 5, cy + 4)
+        }
+        if (gx !== null) {
+          const o0 = Math.max(ay0, by0)
+          const o1 = Math.min(ay1, by1)
+          const lineY =
+            o1 > o0 ? (o0 + o1) / 2 : by1 <= ay0 ? ay0 : by0 >= ay1 ? ay1 : (ay0 + ay1) / 2
+          const aXe = bx0 >= ax1 ? ax1 : ax0
+          const bXe = bx0 >= ax1 ? bx0 : bx1
+          measure(X(aXe), Y(lineY), X(bXe), Y(lineY), gx, true)
+        }
+        if (gy !== null) {
+          const h0 = Math.max(ax0, bx0)
+          const h1 = Math.min(ax1, bx1)
+          const lineX =
+            h1 > h0 ? (h0 + h1) / 2 : bx1 <= ax0 ? ax0 : bx0 >= ax1 ? ax1 : (ax0 + ax1) / 2
+          const aYe = by0 >= ay1 ? ay1 : ay0
+          const bYe = by0 >= ay1 ? by0 : by1
+          measure(X(lineX), Y(aYe), X(lineX), Y(bYe), gy, false)
+        }
       }
     }
 
