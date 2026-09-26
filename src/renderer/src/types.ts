@@ -4,6 +4,10 @@ export interface TextInfo {
   color?: string
   fontFamily?: string
   fontWeight?: string
+  /** 行距（px），来自 PS leading */
+  leading?: number
+  /** 字距（PS tracking，单位 1/1000 em） */
+  tracking?: number
 }
 
 export interface PsdLayer {

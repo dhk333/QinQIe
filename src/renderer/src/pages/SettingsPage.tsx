@@ -390,13 +390,8 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 {[1, 2, 3].map((s) => (
                   <button
                     key={s}
-                    className={prefs.scales.includes(s) ? 'on' : ''}
-                    onClick={() => {
-                      const next = new Set(prefs.scales)
-                      if (next.has(s)) next.delete(s)
-                      else next.add(s)
-                      if (next.size) setPref({ scales: [...next].sort((a, b) => a - b) })
-                    }}
+                    className={prefs.scales.length === 1 && prefs.scales[0] === s ? 'on' : ''}
+                    onClick={() => setPref({ scales: [s] })}
                   >
                     @{s}x
                   </button>

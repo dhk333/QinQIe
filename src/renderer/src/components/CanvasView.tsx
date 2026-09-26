@@ -465,6 +465,12 @@ export default function CanvasView({
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      if (!(e.ctrlKey || e.metaKey)) {
+        // 默认滚轮 = 页面滚动（上下/左右平移画布）
+        setOffset((o) => ({ x: o.x - e.deltaX, y: o.y - e.deltaY }))
+        return
+      }
+      // Ctrl/⌘ + 滚轮 = 以光标为锚点缩放
       const rect = el.getBoundingClientRect()
       const mx = e.clientX - rect.left
       const my = e.clientY - rect.top
@@ -481,6 +487,17 @@ export default function CanvasView({
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
+
+  // 夹持平移：任一方向至少保留 60px 画布在视口内，缩放/滚动都不会把设计稿移出可达范围
+  useEffect(() => {
+    if (!doc) return
+    const MIN = 60
+    const dw = doc.width * zoom
+    const dh = doc.height * zoom
+    const cx = Math.min(Math.max(offset.x, MIN - dw), size.w - MIN)
+    const cy = Math.min(Math.max(offset.y, MIN - dh), size.h - MIN)
+    if (cx !== offset.x || cy !== offset.y) setOffset({ x: cx, y: cy })
+  }, [doc, zoom, offset, size])
 
   const hitSlice = (mx: number, my: number): DocSlice | null => {
     const dx = (mx - offset.x) / zoom
