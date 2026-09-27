@@ -12,6 +12,8 @@ export interface TextInfo {
 
 export interface PsdLayer {
   id: number
+  /** 跨会话稳定的图层标识：优先 Photoshop lyid，缺失时退回解析路径。编辑量按它持久化 */
+  key: string
   name: string
   type: 'group' | 'layer'
   left: number
@@ -25,6 +27,9 @@ export interface PsdLayer {
   clipping: boolean
   blendMode: string
   children?: PsdLayer[]
+  /** 下面两项由编辑覆盖层写入，供面板回显与 CSS 生成，渲染仍以合成器节点为准 */
+  radius?: number
+  border?: BorderEdit
 }
 
 export interface PsdDoc {
@@ -51,6 +56,8 @@ export interface ProjectPsd {
   missing?: boolean
   /** 手工切片，随项目持久化 */
   slices?: DocSlice[]
+  /** 图层编辑量，按 PsdLayer.key 索引；只覆盖渲染输入，不回写 PSD 源文件 */
+  layerEdits?: Record<string, LayerEdit>
 }
 
 export interface Project {
@@ -77,4 +84,47 @@ export interface DocSlice {
   /** 覆盖批量导出的格式/倍数；未设则跟随面板参数 */
   format?: ExportFormat
   scale?: number
+}
+
+/** 边框：几何语义与 PS/Figma 的 inside-center-outside 一致 */
+export interface BorderEdit {
+  size: number
+  color: string
+  opacity: number
+  position: 'inside' | 'center' | 'outside'
+}
+
+/** 投影：角度为光源方向，与 PSD 内建投影同一套换算 */
+export interface ShadowEdit {
+  color: string
+  opacity: number
+  angle: number
+  distance: number
+  size: number
+  choke: number
+}
+
+/**
+ * 单个图层的编辑量。字段缺省即「跟随 PSD 原值」，因此删字段等于重置该项。
+ * baseName 记录打标时的图层名：PSD 结构变化后 key 可能指向别的图层，靠它拦下错位。
+ */
+export interface LayerEdit {
+  baseName: string
+  name?: string
+  /**
+   * 相对 PSD 原位置的偏移（文档 px）。用偏移而不是绝对坐标，
+   * 是为了让「组移动 + 组内图层移动」能各自独立累加，面板写回时只需
+   * 「新值 − 当前显示值」，不必反算祖先链的位移。
+   */
+  dx?: number
+  dy?: number
+  /** 目标宽高（文档 px）：仅叶子图层生效，组不改尺寸 */
+  width?: number
+  height?: number
+  opacity?: number
+  blendMode?: string
+  /** 四角统一的圆角半径（px） */
+  radius?: number
+  border?: BorderEdit
+  shadow?: ShadowEdit
 }

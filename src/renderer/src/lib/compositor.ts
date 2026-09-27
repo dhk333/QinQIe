@@ -30,6 +30,9 @@ export interface RasterCtx {
   globalAlpha: number
   globalCompositeOperation: string
   createLinearGradient(x0: number, y0: number, x1: number, y1: number): RasterGradient
+  /** 重采样时的插值开关：两侧都显式设成 high，避免浏览器默认与 skia 默认不一致 */
+  imageSmoothing?: boolean
+  imageSmoothingQuality?: string
 }
 
 export interface RasterImageData {
@@ -144,7 +147,12 @@ export interface RNode {
   shapeLayer?: boolean
   effects?: EffectInfo | null
   children?: RNode[]
-  /** 叶子位图的惰性缓存（蒙版+样式烘焙结果） */
+  /** 圆角半径（文档 px）：编辑器覆盖层写入，把内容裁成四角圆润的形状 */
+  radius?: number
+  /** 重采样目标尺寸（文档 px）：编辑器改过宽高时写入，位图按此尺寸落笔 */
+  destW?: number
+  destH?: number
+  /** 叶子位图的惰性缓存（蒙版+样式烘焙结果），宽高与圆角都由烘焙阶段生效 */
   bitmap?: { canvas: RasterCanvas; rect: Rect } | null
   // ---- 以下均为合成期内部惰性缓存，不承载文档语义，构建 RNode 时无需赋值 ----
   /** 组级分段缓存：可见性签名命中时整组一次 blit，避免全文档重落笔 */
@@ -278,10 +286,13 @@ function alphaPlane(data: Uint8ClampedArray, w: number, h: number): Float64Array
   return out
 }
 
-/** 一维滑动窗口 min/max（单调队列），用于可分离的方结构元形态学 */
+/**
+ * 一维滑动窗口 min/max（单调队列），用于可分离的方结构元形态学。
+ * 越界取 0 而不是复制边缘：位图边界之外就是无像素，腐蚀才会在此处生成内缩带，
+ * 内描边/内阴影才画得出来；膨胀也不该被不存在的像素喂饱。
+ */
 function lineFilter(src: Float64Array, dst: Float64Array, start: number, count: number, stride: number, r: number, min: boolean): void {
-  const idx = (i: number) => (i < 0 ? 0 : i >= count ? count - 1 : i)
-  const val = (i: number) => src[start + idx(i) * stride]
+  const val = (i: number) => (i < 0 || i >= count ? 0 : src[start + i * stride])
   const deq = new Int32Array(count + 2 * r + 4)
   let head = 0
   let tail = 0
@@ -310,8 +321,7 @@ function morph(plane: Float64Array, w: number, h: number, r: number, min: boolea
 }
 
 function lineBlur(src: Float64Array, dst: Float64Array, start: number, count: number, stride: number, r: number): void {
-  const idx = (i: number) => (i < 0 ? 0 : i >= count ? count - 1 : i)
-  const val = (i: number) => src[start + idx(i) * stride]
+  const val = (i: number) => (i < 0 || i >= count ? 0 : src[start + i * stride])
   const win = r * 2 + 1
   let acc = 0
   for (let i = -r; i <= r; i++) acc += val(i)
@@ -379,6 +389,50 @@ function planeToCanvas(env: Env, plane: Float64Array, w: number, h: number): Ras
   }
   ctx.putImageData(img, 0, 0)
   return c
+}
+
+// ---------------------------------------------------------------- 圆角与重采样
+
+/**
+ * 圆角矩形的覆盖率 alpha 面：用带内最近距离场（SDF）解析求值，1px 线性过渡做抗锯齿。
+ * 不走 ctx.roundRect —— 浏览器与 @napi-rs/canvas 的实现版本不一致，
+ * 而这条路径必须两边逐像素相同。
+ */
+function roundedAlpha(w: number, h: number, radius: number): Float64Array {
+  const out = new Float64Array(w * h)
+  const r = Math.min(radius, w / 2, h / 2)
+  const hw = w / 2
+  const hh = h / 2
+  for (let y = 0; y < h; y++) {
+    const qy = Math.abs(y + 0.5 - hh) - (hh - r)
+    const row = y * w
+    for (let x = 0; x < w; x++) {
+      const qx = Math.abs(x + 0.5 - hw) - (hw - r)
+      // 四条边内侧的距离为负，只有真的落在角上才需要算圆弧距离
+      const d = Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r
+      const a = 0.5 - d
+      out[row + x] = a <= 0 ? 0 : a >= 1 ? 255 : a * 255
+    }
+  }
+  return out
+}
+
+/** 就地裁剪：把画布 alpha 乘上圆角矩形覆盖率，颜色不动 */
+function clipCorners(env: Env, src: RasterCanvas, radius: number): void {
+  const ctx = src.getContext('2d')
+  ctx.globalCompositeOperation = 'destination-in'
+  ctx.drawImage(planeToCanvas(env, roundedAlpha(src.width, src.height, radius), src.width, src.height), 0, 0)
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+/** 按编辑器设定的目标尺寸重采样位图；蒙版与图层样式都在重采样后的分辨率上再生效 */
+function resample(env: Env, src: LeafSource, w: number, h: number): RasterCanvas {
+  const out = env.createCanvas(w, h)
+  const ctx = out.getContext('2d')
+  ctx.imageSmoothing = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, w, h)
+  return out
 }
 
 // ---------------------------------------------------------------- 蒙版
@@ -559,13 +613,22 @@ function hasEffects(e?: EffectInfo | null): boolean {
 }
 
 /** 内容位图 + 图层样式 → 最终位图；(cx,cy) 为内容左上角的文档坐标，rect 为目标区域（含外扩） */
-function bake(env: Env, content: LeafSource, cx: number, cy: number, rect: Rect, e: EffectInfo | null | undefined, fill: number): RasterCanvas {
+function bake(
+  env: Env,
+  content: LeafSource,
+  cx: number,
+  cy: number,
+  rect: Rect,
+  e: EffectInfo | null | undefined,
+  fill: number,
+  radius = 0
+): RasterCanvas {
   const c = env.createCanvas(rect.w, rect.h)
   const ctx = c.getContext('2d')
   const ox = cx - rect.x
   const oy = cy - rect.y
 
-  if (!hasEffects(e)) {
+  if (!hasEffects(e) && !radius) {
     ctx.globalAlpha = fill
     ctx.drawImage(content, ox, oy)
     return c
@@ -574,24 +637,26 @@ function bake(env: Env, content: LeafSource, cx: number, cy: number, rect: Rect,
   // 内容先画进临时画布，便于取「内容 alpha」作为各样式的作用域
   const inner = env.createCanvas(content.width, content.height)
   inner.getContext('2d').drawImage(content, 0, 0)
+  // 圆角先于样式生效：描边/投影都以裁过的轮廓为形状，外描边的转角半径才会是 r+w
+  if (radius) clipCorners(env, inner, radius)
   const alpha = canvasAlpha(env, inner)
   const outer = padPlane(alpha, rect.w, rect.h, ox, oy)
 
-  for (const s of e!.dropShadow ?? []) if (s.enabled) drawShadowLayer(ctx, env, s, outer, 0, 0)
-  if (e!.outerGlow?.enabled) drawGlowLayer(ctx, env, e!.outerGlow, outer, 0, 0)
+  for (const s of e?.dropShadow ?? []) if (s.enabled) drawShadowLayer(ctx, env, s, outer, 0, 0)
+  if (e?.outerGlow?.enabled) drawGlowLayer(ctx, env, e?.outerGlow, outer, 0, 0)
   ctx.save()
   ctx.globalAlpha = fill
   ctx.drawImage(inner, ox, oy)
   ctx.restore()
 
-  for (const s of e!.innerShadow ?? []) {
+  for (const s of e?.innerShadow ?? []) {
     if (!s.enabled) continue
     const { dx, dy } = shadowOffset(s.angle, s.distance)
     drawInnerLayer(ctx, env, s, alpha, ox, oy, dx, dy)
   }
-  const ig = e!.innerGlow
+  const ig = e?.innerGlow
   if (ig?.enabled) drawInnerLayer(ctx, env, { ...ig, size: ig.size, choke: ig.choke }, alpha, ox, oy, 0, 0)
-  for (const f of e!.solidFill ?? []) {
+  for (const f of e?.solidFill ?? []) {
     if (!f.enabled) continue
     const tint = tinted(env, alpha.plane, alpha.w, alpha.h, f.color, f.opacity)
     ctx.save()
@@ -599,7 +664,7 @@ function bake(env: Env, content: LeafSource, cx: number, cy: number, rect: Rect,
     ctx.drawImage(tint, ox, oy)
     ctx.restore()
   }
-  for (const g of e!.gradientOverlay ?? []) {
+  for (const g of e?.gradientOverlay ?? []) {
     if (!g.enabled) continue
     const grad = gradientCanvas(env, g, alpha.w, alpha.h)
     const gc = env.createCanvas(alpha.w, alpha.h)
@@ -614,20 +679,32 @@ function bake(env: Env, content: LeafSource, cx: number, cy: number, rect: Rect,
     ctx.drawImage(gc, ox, oy)
     ctx.restore()
   }
-  for (const s of e!.stroke ?? []) if (s.enabled) drawStroke(ctx, env, s, alpha, ox, oy)
+  for (const s of e?.stroke ?? []) if (s.enabled) drawStroke(ctx, env, s, alpha, ox, oy)
   return c
 }
 
-/** 叶子图层位图（含蒙版与图层样式），带外扩；结果缓存在节点上 */
-export function leafBitmap(n: RNode, env: Env): { canvas: RasterCanvas; rect: Rect } | null {
-  if (n.bitmap) return n.bitmap
+/** 编辑器几何生效后的内容位图：先按目标尺寸重采样，再套图层蒙版，不含图层样式 */
+function maskedContent(n: RNode, env: Env): LeafSource | null {
   const base = n.canvas
   if (!base || base.width === 0 || base.height === 0) return null
+  let content: LeafSource = base
+  if (n.destW && n.destH && (content.width !== n.destW || content.height !== n.destH))
+    content = resample(env, content, n.destW, n.destH)
+  if (n.mask) content = applyMask(env, content, n.mask, n.left, n.top)
+  return content
+}
+
+/** 叶子图层位图（含重采样、蒙版与图层样式），带外扩；结果缓存在节点上 */
+export function leafBitmap(n: RNode, env: Env): { canvas: RasterCanvas; rect: Rect } | null {
+  if (n.bitmap) return n.bitmap
+  const content = maskedContent(n, env)
+  if (!content) return null
   const rect = nodeRect(n)
   if (isEmpty(rect)) return null
-  let content = base
-  if (n.mask) content = applyMask(env, content, n.mask, n.left, n.top)
-  n.bitmap = { canvas: bake(env, content, n.left, n.top, rect, n.effects, n.fillOpacity), rect }
+  n.bitmap = {
+    canvas: bake(env, content, n.left, n.top, rect, n.effects, n.fillOpacity, n.radius),
+    rect
+  }
   return n.bitmap
 }
 
@@ -684,19 +761,25 @@ function clipAlpha(n: RNode, rc: RenderCtx, within?: Rect | null): { canvas: Lea
     if (!r) return null
     return { canvas: r.canvas, x: r.rect.x, y: r.rect.y }
   }
-  if (!n.canvas) return null
   if (n.effects?.stroke?.some((s) => s.enabled) || n.effects?.solidFill?.some((s) => s.enabled)) {
     const bmp = leafBitmap(n, rc.env)
     if (bmp) return { canvas: bmp.canvas, x: bmp.rect.x, y: bmp.rect.y }
   }
-  let content: LeafSource = n.canvas
-  if (n.mask) content = applyMask(rc.env, content, n.mask, n.left, n.top)
+  const content = maskedContent(n, rc.env)
+  if (!content) return null
+  // 圆过角的图层当剪贴基底时，裁切轮廓也要跟着圆角走
+  if (n.radius)
+    return {
+      canvas: bake(rc.env, content, n.left, n.top, contentRect(n), null, n.fillOpacity, n.radius),
+      x: n.left,
+      y: n.top
+    }
   if (n.fillOpacity < 1) {
     const f = rc.env.createCanvas(content.width, content.height)
     const fctx = f.getContext('2d')
     fctx.globalAlpha = n.fillOpacity
     fctx.drawImage(content, 0, 0)
-    content = f
+    return { canvas: f, x: n.left, y: n.top }
   }
   return { canvas: content, x: n.left, y: n.top }
 }
@@ -760,13 +843,13 @@ function paintList(t: PaintTarget, nodes: RNode[], rc: RenderCtx): void {
   }
 }
 
-/** 组只有在需要离屏时才建缓冲：带蒙版、不透明度 <1、非正常混合模式、带图层样式 */
+/** 组只有在需要离屏时才建缓冲：带蒙版、不透明度 <1、非正常混合模式、带图层样式、要圆角裁切 */
 function needsOffscreen(n: RNode): boolean {
   if (n.kind !== 'group') return false
   if (n.mask) return true
   if (n.opacity < 1) return true
   if (n.blendMode && n.blendMode !== 'normal' && n.blendMode !== 'pass through') return true
-  if (hasEffects(n.effects)) return true
+  if (hasEffects(n.effects) || n.radius) return true
   return false
 }
 
@@ -843,7 +926,10 @@ function paintGroup(t: PaintTarget, n: RNode, rc: RenderCtx): void {
   }
   const r = renderGroup(n, rc, rect)
   if (!r) return
-  const out = hasEffects(n.effects) ? bake(rc.env, r.canvas, r.rect.x, r.rect.y, r.rect, n.effects, 1) : r.canvas
+  const out =
+    hasEffects(n.effects) || n.radius
+      ? bake(rc.env, r.canvas, r.rect.x, r.rect.y, r.rect, n.effects, 1, n.radius)
+      : r.canvas
   if (cacheable) n.seg = { sig, rect: r.rect, canvas: out }
   blitGroup(t, n, out, r.rect)
 }
@@ -893,8 +979,11 @@ export function renderIsolated(n: RNode, rc: RenderCtx): { canvas: RasterCanvas;
       : (() => {
           const g = renderGroup(n, rc, null)
           if (!g) return null
-          return hasEffects(n.effects)
-            ? { canvas: bake(rc.env, g.canvas, g.rect.x, g.rect.y, g.rect, n.effects, 1), rect: g.rect }
+          return hasEffects(n.effects) || n.radius
+            ? {
+                canvas: bake(rc.env, g.canvas, g.rect.x, g.rect.y, g.rect, n.effects, 1, n.radius),
+                rect: g.rect
+              }
             : g
         })()
   if (!r || n.opacity >= 1) return r
@@ -1082,4 +1171,4 @@ export interface AgEffects {
   solidFill?: { enabled?: boolean; blendMode?: string; color?: AgColor; opacity?: number }[]
   gradientOverlay?: AgGradientOverlay[]
 }
-
+

@@ -11,7 +11,10 @@ export async function loadProjectsData(): Promise<Project[]> {
   // 兼容旧数据补全字段
   for (const p of projects) {
     p.groups ||= []
-    for (const psd of p.psds) psd.groupId ??= null
+    for (const psd of p.psds) {
+      psd.groupId ??= null
+      psd.layerEdits ||= {}
+    }
   }
   return projects
 }

@@ -99,16 +99,33 @@ function groupBounds(children: PsdLayer[]): { left: number; top: number; width: 
   return { left: l, top: t, width: r - l, height: b - t }
 }
 
-function toNode(layer: Layer, canvasMap: Map<number, LayerBitmap>, ids: WeakMap<Layer, number>): PsdLayer {
+/**
+ * 图层的跨会话标识。PSD 内部 id 只在 ag-psd 主解析器里有，
+ * 所以缺 lyid 的文件退回「同级序号路径」——序号在两个解析器里都按自底向上计，
+ * 保证同一图层两边算出同一个 key；类型从 i 变 p 时旧编辑会整体失效而不是贴错图层。
+ */
+function layerKey(lyid: number | undefined, path: string): string {
+  return typeof lyid === 'number' ? `i${lyid}` : `p${path}`
+}
+
+function toNode(
+  layer: Layer,
+  canvasMap: Map<number, LayerBitmap>,
+  ids: WeakMap<Layer, number>,
+  path: string
+): PsdLayer {
   const id = nextId++
   ids.set(layer, id)
   if (layer.canvas) canvasMap.set(id, layer.canvas)
   const left = layer.left ?? 0
   const top = layer.top ?? 0
-  const children = layer.children?.length ? layer.children.map((c) => toNode(c, canvasMap, ids)) : undefined
+  const children = layer.children?.length
+    ? layer.children.map((c, i) => toNode(c, canvasMap, ids, `${path}.${i}`))
+    : undefined
   const gb = children ? groupBounds(children) : null
   return {
     id,
+    key: layerKey(layer.id, path),
     name: layer.name?.trim() || (layer.children ? '未命名组' : '未命名图层'),
     type: layer.children ? 'group' : 'layer',
     left: gb?.left ?? left,
@@ -209,7 +226,7 @@ export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = f
   const canvasMap = new Map<number, LayerBitmap>()
   const ids = new WeakMap<Layer, number>()
   const layers = psd.children ?? []
-  let tree: PsdLayer[] = layers.map((l) => toNode(l, canvasMap, ids))
+  let tree: PsdLayer[] = layers.map((l, i) => toNode(l, canvasMap, ids, String(i)))
   let rnodes = toRNodes(layers, ids)
   if (tree.length === 0 && psd.canvas) {
     const id = nextId++
@@ -217,6 +234,7 @@ export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = f
     tree = [
       {
         id,
+        key: 'p0',
         name: fileName,
         type: 'layer',
         left: 0,
@@ -277,7 +295,9 @@ export function buildCompositeCanvas(
   }) as HTMLCanvasElement
 }
 
-// 图层（或组合成图）→ 以图层自身范围裁剪的画布，供预览与导出共用
+// 图层（或组合成图）→ 以图层范围裁剪的画布，供预览与导出共用。
+// 裁剪框取「图层 rect ∪ 烘焙 rect」：外描边、投影这类溢出图层边界的效果必须一起出图，
+// 没有外扩时两者相同，出图尺寸与旧版逐像素一致。
 export function renderLayerCanvas(
   layer: PsdLayer,
   rnodes: RNode[],
@@ -287,12 +307,14 @@ export function renderLayerCanvas(
   if (!node) return null
   const r = renderIsolated(node, { env: browserEnv, hiddenIds })
   if (!r) return null
+  const x = Math.min(layer.left, r.rect.x)
+  const y = Math.min(layer.top, r.rect.y)
   const out = document.createElement('canvas')
-  out.width = Math.max(1, Math.round(layer.width))
-  out.height = Math.max(1, Math.round(layer.height))
+  out.width = Math.max(1, Math.round(Math.max(layer.left + layer.width, r.rect.x + r.rect.w) - x))
+  out.height = Math.max(1, Math.round(Math.max(layer.top + layer.height, r.rect.y + r.rect.h) - y))
   const ctx = out.getContext('2d')
   if (!ctx) return null
-  ctx.drawImage(r.canvas as unknown as HTMLCanvasElement, Math.round(r.rect.x - layer.left), Math.round(r.rect.y - layer.top))
+  ctx.drawImage(r.canvas as unknown as HTMLCanvasElement, Math.round(r.rect.x - x), Math.round(r.rect.y - y))
   return out
 }
 
@@ -319,12 +341,14 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
 
   // webtoon 的 children 是自上而下（顶层在前），与 ag-psd 相反；
   // 逆序遍历，统一成自底向上，保证绘制顺序与剪贴链语义一致
-  const walk = async (nodes: any[]): Promise<{ layers: PsdLayer[]; rnodes: RNode[] }> => {
+  const walk = async (nodes: any[], path: string): Promise<{ layers: PsdLayer[]; rnodes: RNode[] }> => {
     const out: PsdLayer[] = []
     const rnodes: RNode[] = []
     for (let k = nodes.length - 1; k >= 0; k--) {
       const node = nodes[k]
       const id = nextId++
+      // 同级序号按「自底向上」编号，与主解析器的路径 key 对齐
+      const selfPath = path + (nodes.length - 1 - k)
       const left = node.left ?? 0
       const top = node.top ?? 0
       const width = node.width ?? 0
@@ -343,7 +367,7 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
           // 单层渲染失败时跳过该层位图
         }
       }
-      const sub = node.children ? await walk(node.children) : null
+      const sub = node.children ? await walk(node.children, selfPath + '.') : null
       const children = sub?.layers
       const name = node.name || (node.type === 'Group' ? '未命名组' : '未命名图层')
       const blendMode = WEBTOON_BLEND_TO_AG[(node.blendMode as string) ?? 'norm'] ?? 'normal'
@@ -362,6 +386,7 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
       )
       out.push({
         id,
+        key: 'p' + selfPath,
         name,
         type: node.type === 'Group' ? 'group' : 'layer',
         left: bx,
@@ -391,7 +416,7 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
     return { layers: out, rnodes }
   }
 
-  const { layers: tree, rnodes } = await walk(psd.children ?? [])
+  const { layers: tree, rnodes } = await walk(psd.children ?? [], '')
   if (tree.length === 0) throw new Error('备用解析器：未找到图层')
   return {
     doc: { fileName, width: psd.width, height: psd.height },
@@ -400,4 +425,4 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
     rnodes
   }
 }
-
+
