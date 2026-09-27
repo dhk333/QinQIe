@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import Markdown from '@/components/Markdown'
 import { useT } from '@/i18n/core'
 
 // ========== Toast ==========
@@ -112,7 +113,7 @@ function DialogModal({ state, onClose }: { state: DialogState; onClose: (v: stri
     >
       <div className="modal">
         <h3>{opts.title}</h3>
-        {opts.desc && <p>{opts.desc}</p>}
+        {opts.desc && <Markdown text={opts.desc} />}
         {isPrompt && (
           <input
             ref={inputRef}
