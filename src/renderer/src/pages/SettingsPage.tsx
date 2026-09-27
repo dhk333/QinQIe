@@ -229,8 +229,8 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
   }
 
   return (
-    <div className="set-wrap">
-      <aside className="set-nav">
+    <div id="page-settings" className="flex flex-1 min-h-0">
+      <aside className="flex w-[220px] shrink-0 flex-col border-r border-border bg-panel">
         <div className="set-search">
           <SearchIcon className="h-3.5 w-3.5 shrink-0 text-txt-3" />
           <input
@@ -250,26 +250,28 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                   onClick={() => switchTo(i.id)}
                 >
                   <i.Icon className="h-3.5 w-3.5" />
-                  <span className="si-col">
+                  <span className="flex min-w-0 flex-col gap-px">
                     {t(i.label)}
                     {query.trim() && i.keywords && (
-                      <small className="si-kw">{i.keywords}</small>
+                      <small className="overflow-hidden text-ellipsis text-[10px] font-normal whitespace-nowrap text-txt-3">
+                        {i.keywords}
+                      </small>
                     )}
                   </span>
                 </div>
               ))}
             </section>
           ))}
-          {!groups.length && <p className="set-empty">{t('没有匹配的设置')}</p>}
+          {!groups.length && <p className="px-[10px] py-4 text-center text-[12px] text-txt-3">{t('没有匹配的设置')}</p>}
         </div>
       </aside>
-      <main className="set-main">
+      <main className="min-w-0 flex-1 overflow-y-auto bg-bg">
         <div key={active} className={`set-pane${pending ? ' out' : ''}`}>
         {active === 'themes' && (
           <div className="set-sec set-sec-wide">
             <h4>{t('主题')}</h4>
-            <p className="set-desc">{t('全局配色方案（含明暗），点击即切换，重启后保持')}</p>
-            <div className="theme-grid">
+            <p className="m-0 mb-[18px] text-[12px] leading-[1.6] text-txt-3">{t('全局配色方案（含明暗），点击即切换，重启后保持')}</p>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-[14px]">
               {THEMES.map((th) => (
                 <div
                   key={th.id}
@@ -280,11 +282,15 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                   }}
                 >
                   <ThemePreview bg={th.preview[0]} panel={th.preview[1]} accent={th.preview[2]} />
-                  <div className="th-meta">
-                    <span className="th-name">{t(th.name)}</span>
-                    <span className="th-desc">{t(th.desc)}</span>
+                  <div className="mt-2 flex flex-col gap-px">
+                    <span className="text-[12.5px] font-medium text-txt">{t(th.name)}</span>
+                    <span className="text-[10.5px] text-txt-3">{t(th.desc)}</span>
                   </div>
-                  {theme === th.id && <span className="th-check">✓</span>}
+                  {theme === th.id && (
+                    <span className="absolute right-[6px] top-[6px] grid h-[18px] w-[18px] place-items-center rounded-full bg-accent text-[11px] text-white">
+                      ✓
+                    </span>
+                  )}
                 </div>
               ))}
               {custom ? (
@@ -293,11 +299,15 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                   onClick={() => onThemeChange(CUSTOM_ID)}
                 >
                   <ThemePreview bg={custom.bg} panel={custom.panel} accent={custom.accent} />
-                  <div className="th-meta">
-                    <span className="th-name">{custom.name}</span>
-                    <span className="th-desc">{t('自定义')} · {custom.base === 'dark' ? t('暗色') : t('亮色')}</span>
+                  <div className="mt-2 flex flex-col gap-px">
+                    <span className="text-[12.5px] font-medium text-txt">{custom.name}</span>
+                    <span className="text-[10.5px] text-txt-3">{t('自定义')} · {custom.base === 'dark' ? t('暗色') : t('亮色')}</span>
                   </div>
-                  {theme === CUSTOM_ID && <span className="th-check">✓</span>}
+                  {theme === CUSTOM_ID && (
+                    <span className="absolute right-[6px] top-[6px] grid h-[18px] w-[18px] place-items-center rounded-full bg-accent text-[11px] text-white">
+                      ✓
+                    </span>
+                  )}
                   <button
                     className="th-edit"
                     onClick={(e) => {
@@ -338,7 +348,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                     ))}
                   </div>
                 </div>
-                <div className="ct-colors">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
                   {COLOR_FIELDS.map((f) => (
                     <label key={f.key} className={`ct-color${isHex(draft[f.key]) ? '' : ' ct-bad'}`}>
                       <input
@@ -359,9 +369,9 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 </div>
                 <div className="ct-preview">
                   <ThemePreview bg={draft.bg} panel={draft.panel} accent={draft.accent} />
-                  {!draftValid && <span className="ct-warn">{t('色值需为 #rrggbb 十六进制格式')}</span>}
+                  {!draftValid && <span className="text-[11px] text-[#ef4444]">{t('色值需为 #rrggbb 十六进制格式')}</span>}
                 </div>
-                <div className="ct-foot">
+                <div className="mt-4 flex gap-[10px]">
                   <button className="btn btn-primary" disabled={!draftValid} onClick={saveDraft}>
                     {t('保存并应用')}
                   </button>
@@ -381,7 +391,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
         {active === 'storage' && (
           <div className="set-sec">
             <h4>{t('存储与缓存')}</h4>
-            <p className="set-desc">{t('所有数据只保存在本机用户目录，不联网、不上传')}</p>
+            <p className="m-0 mb-[18px] text-[12px] leading-[1.6] text-txt-3">{t('所有数据只保存在本机用户目录，不联网、不上传')}</p>
             <dl className="ab-kv st-kv">
               <dt>{t('数据目录')}</dt>
               <dd>{stats?.root ?? t('读取中…')}</dd>
@@ -392,7 +402,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               <dt>{t('偏好设置')}</dt>
               <dd>{t('主题 / 字体 / 快捷键 / 导出默认，存于本机渲染层存储')}</dd>
             </dl>
-            <div className="st-btns">
+            <div className="m-0 mt-4 flex gap-[10px]">
               <button className="btn btn-secondary" onClick={() => window.api.openDataDir()}>
                 <FolderIcon className="h-3.5 w-3.5" />
                 {t('打开数据目录')}
@@ -407,9 +417,9 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
         {active === 'export' && (
           <div className="set-sec">
             <h4>{t('导出设置')}</h4>
-            <p className="set-desc">{t('详情页导出面板的默认值，修改后立即保存、重启后保持')}</p>
-            <div className="es-row">
-              <span className="es-label">{t('默认格式')}</span>
+            <p className="m-0 mb-[18px] text-[12px] leading-[1.6] text-txt-3">{t('详情页导出面板的默认值，修改后立即保存、重启后保持')}</p>
+            <div className="mb-[14px] flex items-center gap-4">
+              <span className="w-16 shrink-0 text-[12px] text-txt-2">{t('默认格式')}</span>
               <div className="es-seg">
                 {([['png', 'PNG'], ['jpeg', 'JPG'], ['webp', 'WebP']] as const).map(([f, label]) => (
                   <button key={f} className={prefs.format === f ? 'on' : ''} onClick={() => setPref({ format: f })}>
@@ -418,8 +428,8 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 ))}
               </div>
             </div>
-            <div className="es-row">
-              <span className="es-label">{t('默认倍数')}</span>
+            <div className="mb-[14px] flex items-center gap-4">
+              <span className="w-16 shrink-0 text-[12px] text-txt-2">{t('默认倍数')}</span>
               <div className="es-seg">
                 {[1, 2, 3].map((s) => (
                   <button
@@ -432,8 +442,8 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 ))}
               </div>
             </div>
-            <div className="es-row">
-              <span className="es-label">{t('默认质量')}</span>
+            <div className="mb-[14px] flex items-center gap-4">
+              <span className="w-16 shrink-0 text-[12px] text-txt-2">{t('默认质量')}</span>
               <div className="es-q">
                 <Slider
                   min={0.5}
@@ -446,14 +456,14 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 <b>{Math.round(prefs.quality * 100)}%</b>
               </div>
             </div>
-            {prefs.format === 'png' && <p className="set-desc es-note">{t('PNG 为无损格式，质量设置仅在 JPG / WebP 时生效')}</p>}
+            {prefs.format === 'png' && <p className="es-note leading-[1.6] text-txt-3">{t('PNG 为无损格式，质量设置仅在 JPG / WebP 时生效')}</p>}
           </div>
         )}
         {active === 'language' && (
           <div className="set-sec">
             <h4>{t('界面语言')}</h4>
-            <p className="set-desc">{t('切换后立即生效，重启后保持')}</p>
-            <div className="fs-list">
+            <p className="m-0 mb-[18px] text-[12px] leading-[1.6] text-txt-3">{t('切换后立即生效，重启后保持')}</p>
+            <div className="flex flex-col gap-[10px]">
               {LANGS.map((l) => (
                 <div
                   key={l.id}
@@ -463,7 +473,11 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                   <span className="fs-meta" style={{ marginTop: 0 }}>
                     <b>{l.label}</b>
                   </span>
-                  {lang === l.id && <span className="fs-check">✓</span>}
+                  {lang === l.id && (
+                    <span className="ml-auto grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-accent text-[11px] text-white">
+                      ✓
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -472,45 +486,51 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
         {active === 'fontsize' && (
           <div className="set-sec">
             <h4>{t('字体大小')}</h4>
-            <p className="set-desc">{t('界面整体等比缩放，立即生效，重启后保持')}</p>
-            <div className="fs-list">
+            <p className="m-0 mb-[18px] text-[12px] leading-[1.6] text-txt-3">{t('界面整体等比缩放，立即生效，重启后保持')}</p>
+            <div className="flex flex-col gap-[10px]">
               {FONT_SIZES.map((f) => (
                 <div
                   key={f.id}
                   className={`fs-row${fontSize === f.id ? ' on' : ''}`}
                   onClick={() => onFontSizeChange(f.id)}
                 >
-                  <span className="fs-sample" style={{ fontSize: `${12.5 * f.zoom}px` }}>
+                  <span className="w-[92px] shrink-0 font-medium text-txt" style={{ fontSize: `${12.5 * f.zoom}px` }}>
                     {t('轻切 Aa')}
                   </span>
                   <span className="fs-meta">
                     <b>{t(f.name)}</b>
                     <i>{t(f.desc)}</i>
                   </span>
-                  {fontSize === f.id && <span className="fs-check">✓</span>}
+                  {fontSize === f.id && (
+                    <span className="ml-auto grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-accent text-[11px] text-white">
+                      ✓
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
           </div>
         )}
         {active === 'about' && (
-          <div className="about-main">
-            <header className="ab-hero">
+          <div className="max-w-[880px] px-[34px] pb-[44px] pt-7">
+            <header className="flex items-center gap-4">
               <div className="ah-logo">
                 <AppLogo size={40} />
               </div>
               <div>
                 <div className="ab-title-row">
                   <h3>{t('轻切')}</h3>
-                  <span className="ab-ver">v{RELEASES[0]?.version?.replace(/^v/i, '') ?? 'dev'}</span>
+                  <span className="ab-ver">
+                    v{RELEASES[0]?.version?.replace(/^v/i, '') ?? 'dev'}
+                  </span>
                 </div>
-                <p className="ab-tag">{t('本地 PSD 切图工具 · 完全离线')}</p>
+                <p className="m-0 mt-[5px] text-[12px] text-txt-3">{t('本地 PSD 切图工具 · 完全离线')}</p>
               </div>
             </header>
-            <p className="ab-desc">
+            <p className="m-0 mb-6 mt-[18px] max-w-[660px] select-text text-[12.5px] leading-[1.9] text-txt-2">
               {t('直接读取 Photoshop 设计稿，图层树浏览、画布预览与导出与 PS 逐像素对齐；按图层 / 切片批量导出多格式多倍图。设计稿只记录路径、不会被移动或上传，全部处理发生在本机。')}
             </p>
-            <div className="ab-cards">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-[14px]">
               <section className="ab-card">
                 <h5>{t('核心能力')}</h5>
                 <ul>
@@ -522,13 +542,13 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 </ul>
               </section>
             </div>
-            <div className="st-btns">
+            <div className="m-0 mt-4 flex gap-[10px]">
               <button className="btn btn-secondary" disabled={checking} onClick={() => void checkNow()}>
                 <DownloadIcon className="h-3.5 w-3.5" />
                 {checking ? t('检查中…') : t('检查更新')}
               </button>
             </div>
-            <p className="ab-desc ab-foot">
+            <p className="m-0 mt-[14px] max-w-[660px] select-text text-[11.5px] leading-[1.9] text-txt-3">
               {t('数据与缓存管理见「设置 → 通用 → 存储与缓存」；全部处理发生在本机，不联网、不上传。')}
             </p>
           </div>
@@ -537,7 +557,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
         {active === 'shortcuts' && (
           <div className="set-sec set-sec-wide">
             <h4>{t('快捷键设置')}</h4>
-            <p className="set-desc">
+            <p className="m-0 mb-[18px] text-[12px] leading-[1.6] text-txt-3">
               {t('点击键帽后按下新组合即可改绑，自动提示冲突；单条 ↺ 恢复，或全部恢复默认。自定义仅保存在本机。')}
             </p>
             <ShortcutsPanel />
