@@ -21,6 +21,8 @@ interface Props {
   rnodes: RNode[]
   canvasMap: Map<number, HTMLCanvasElement>
   hiddenIds: Set<number>
+  /** 逐层位图解码完成前的内嵌合成图占位；解码完成或用户改显隐后即失效让位给真实合成 */
+  preview?: HTMLCanvasElement | null
   selectedIds: Set<number>
   onSelect: (layer: PsdLayer | null, mods: { ctrl: boolean; shift: boolean }) => void
   onLayerContext?: (layer: PsdLayer, x: number, y: number) => void
@@ -137,6 +139,7 @@ export default function CanvasView({
   rnodes,
   canvasMap,
   hiddenIds,
+  preview,
   selectedIds,
   onSelect,
   onLayerContext,
@@ -265,17 +268,22 @@ export default function CanvasView({
     ctx.scale(zoom, zoom)
     ctx.fillStyle = makeCheckerPattern(ctx)
     ctx.fillRect(0, 0, doc.width, doc.height)
-    if (!composite.current || composite.current.rnodes !== rnodes || composite.current.hiddenIds !== hiddenIds) {
-      const t0 = performance.now()
-      perfCompositeBegin()
-      composite.current = {
-        rnodes,
-        hiddenIds,
-        canvas: buildCompositeCanvas(doc, rnodes, hiddenIds)
+    if (preview) {
+      // 解码未完成：先铺 PSD 内嵌合成图，画面即刻可用；显隐变更等解码完成后一并生效
+      ctx.drawImage(preview, 0, 0)
+    } else {
+      if (!composite.current || composite.current.rnodes !== rnodes || composite.current.hiddenIds !== hiddenIds) {
+        const t0 = performance.now()
+        perfCompositeBegin()
+        composite.current = {
+          rnodes,
+          hiddenIds,
+          canvas: buildCompositeCanvas(doc, rnodes, hiddenIds)
+        }
+        perfCompositeSpan(performance.now() - t0)
       }
-      perfCompositeSpan(performance.now() - t0)
+      ctx.drawImage(composite.current.canvas, 0, 0)
     }
-    ctx.drawImage(composite.current.canvas, 0, 0)
     ctx.restore()
 
     const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#4c7bf3'
@@ -473,7 +481,7 @@ export default function CanvasView({
         ctx.setLineDash([])
       }
     }
-  }, [doc, tree, rnodes, canvasMap, hiddenIds, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId])
+  }, [doc, tree, rnodes, canvasMap, hiddenIds, preview, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId])
 
   // 滚轮缩放
   useEffect(() => {

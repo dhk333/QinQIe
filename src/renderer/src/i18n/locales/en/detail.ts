@@ -9,6 +9,7 @@ export default {
   '加载 PSD 失败': 'Failed to load PSD',
   '主解析器不支持该文件，已使用备用解析器': 'This file is not supported by the main parser; the fallback parser was used',
   '图层位图解码失败': 'Failed to decode layer bitmaps',
+  '图层还在解析中，请稍后导出': 'Layers are still being decoded, please export shortly',
   '加载中，马上就好…': 'Loading, almost there…',
   // 左侧图层面板
   '图 层': 'Layers',

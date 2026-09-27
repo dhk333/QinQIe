@@ -16,6 +16,8 @@ export interface ParseResult {
   canvasMap: Map<number, HTMLCanvasElement>
   /** 与 tree 同 id 的合成器节点树，预览与导出都以它为准 */
   rnodes: RNode[]
+  /** PSD 内嵌合成图：两阶段加载中解码完成前画布的即时预览源 */
+  composite?: HTMLCanvasElement | null
 }
 
 let nextId = 1
@@ -137,11 +139,9 @@ export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = f
   const psd: Psd = readPsd(buffer, {
     skipLinkedFilesData: true,
     skipThumbnail: true,
-    // 结构阶段跳过全部图层位图，仅取树/文本/显隐/bounds（~50ms）
-    ...(structureOnly ? { skipLayerImageData: true, skipCompositeImageData: true } : {})
+    // 结构阶段跳过逐层位图（大头），但保留内嵌合成图（~76ms）供解码完成前即时预览
+    ...(structureOnly ? { skipLayerImageData: true } : {})
   })
-  // 无图层树的扁平 PSD 只能靠合成图，结构阶段跳过合成会取不到位图，直接全量解析
-  if (structureOnly && (psd.children ?? []).length === 0) return parsePsd(buffer, fileName)
   const canvasMap = new Map<number, HTMLCanvasElement>()
   const ids = new WeakMap<Layer, number>()
   const layers = psd.children ?? []
@@ -184,7 +184,13 @@ export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = f
       }
     ]
   }
-  return { doc: { fileName, width: psd.width, height: psd.height }, tree, canvasMap, rnodes }
+  return {
+    doc: { fileName, width: psd.width, height: psd.height },
+    tree,
+    canvasMap,
+    rnodes,
+    composite: psd.canvas ?? null
+  }
 }
 
 // 两阶段加载的第二步：全量解码位图，按 parsePsd(structureOnly) 生成的树位置对齐，

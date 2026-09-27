@@ -82,8 +82,12 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const [doc, setDoc] = useState<PsdDoc | null>(null)
   const [tree, setTree] = useState<PsdLayer[]>([])
   const [decoding, setDecoding] = useState(false)
+  /** 解码完成前画布用的 PSD 内嵌合成图占位 */
+  const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null)
   const [rnodes, setRnodes] = useState<RNode[]>([])
   const canvasMapRef = useRef<Map<number, HTMLCanvasElement>>(new Map())
+  /** 待执行的第二遍全量解码任务（入场动画点亮后消费） */
+  const decodeJobRef = useRef<{ buffer: Uint8Array; name: string; tree: PsdLayer[] } | null>(null)
   const [hiddenIds, setHiddenIds] = useState<Set<number>>(new Set())
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -95,7 +99,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
    *  不会在某档停住等下一档——主线程被解码卡住时整屏本就冻结，恢复后继续爬。 */
   const [loadTarget, setLoadTarget] = useState(0)
   const [loadPct, setLoadPct] = useState(0)
-  const contentReady = !loading && !decoding
+  // 有内嵌合成图预览时不再等解码：先揭示界面，解码在入场动画点亮后台补
+  const contentReady = !loading && (!decoding || !!previewCanvas)
   useEffect(() => {
     if (!contentReady) return
     setLoadTarget(100)
@@ -330,6 +335,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         setHiddenIds(new Set())
         setSelectedId(null)
         setSelectedIds(new Set())
+        // 两阶段：逐层位图还没解出来时，先拿内嵌合成图占位显示
+        setPreviewCanvas(parsed.canvasMap.size === 0 ? (parsed.composite ?? null) : null)
         // 重新进入时恢复上次持久化的切片，序号接着排
         const restored = psd.slices ?? []
         setSlicesRaw(restored)
@@ -339,42 +346,12 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         sliceSeq.current = restored.reduce((m, s) => Math.max(m, Number(s.no) || 0), 0) + 1
         setLoadTarget(60)
         setLoading(false)
-        // 结构阶段跳过了全部位图（canvasMap 为空）时，第二遍全量解码补上
+        // 结构阶段跳过了全部位图（canvasMap 为空）时登记第二遍全量解码任务：
+        // 等入场动画点亮后再跑，transform/opacity 动画在合成器线程不受主线程阻塞影响
         if (parsed.canvasMap.size === 0) {
           setDecoding(true)
-          // 解码会长时间阻塞主线程：先把条放到 88，靠合成器的 transform 过渡继续缓滑
           setLoadTarget(88)
-          setTimeout(async () => {
-            if (!alive) return
-            try {
-              perfBegin('decode')
-              const decoded = decodeLayerCanvases(buffer, parsed.tree)
-              perfEnd('decode')
-              canvasMapRef.current = decoded.canvasMap
-              setRnodes(decoded.rnodes)
-              setLoadTarget(100)
-              setDecoding(false)
-            } catch {
-              // ag-psd 能读结构但位图/蒙版数据解不动（如 Invalid mask size），
-              // 整文档交给备用解析器重建树+位图，节点 id 变了需重置选中态
-              try {
-                const fb = await parsePsdFallback(buffer, name)
-                if (!alive) return
-                canvasMapRef.current = fb.canvasMap
-                setRnodes(fb.rnodes)
-                setDoc(fb.doc)
-                setTree(fb.tree)
-                setHiddenIds(new Set())
-                setSelectedId(null)
-                setSelectedIds(new Set())
-                toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
-              } catch {
-                toast(t('图层位图解码失败'), 'error')
-              }
-              setLoadTarget(100)
-              setDecoding(false)
-            }
-          }, 80)
+          decodeJobRef.current = { buffer, name, tree: parsed.tree }
         }
       })
       .catch(() => {
@@ -384,9 +361,59 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       })
     return () => {
       alive = false
+      decodeJobRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [psd.path])
+
+  // 入场动画点亮后执行登记的全量解码：合成器线程上的动画不会被解码阻塞卡顿。
+  // entered 依赖 rAF，窗口不可见时 rAF 停摆，故带 2.5s 定时器兜底，避免解码永挂
+  const startDecode = useCallback(() => {
+    const job = decodeJobRef.current
+    if (!job) return
+    decodeJobRef.current = null
+    setTimeout(async () => {
+      try {
+        perfBegin('decode')
+        const decoded = decodeLayerCanvases(job.buffer, job.tree)
+        perfEnd('decode')
+        canvasMapRef.current = decoded.canvasMap
+        setRnodes(decoded.rnodes)
+        setPreviewCanvas(null)
+        setLoadTarget(100)
+        setDecoding(false)
+      } catch {
+        // ag-psd 能读结构但位图/蒙版数据解不动（如 Invalid mask size），
+        // 整文档交给备用解析器重建树+位图，节点 id 变了需重置选中态
+        try {
+          const fb = await parsePsdFallback(job.buffer, job.name)
+          canvasMapRef.current = fb.canvasMap
+          setRnodes(fb.rnodes)
+          setDoc(fb.doc)
+          setTree(fb.tree)
+          setHiddenIds(new Set())
+          setSelectedId(null)
+          setSelectedIds(new Set())
+          setPreviewCanvas(null)
+          toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
+        } catch {
+          toast(t('图层位图解码失败'), 'error')
+        }
+        setLoadTarget(100)
+        setDecoding(false)
+      }
+    }, 80)
+  }, [toast, t])
+
+  useEffect(() => {
+    if (!decoding) return
+    if (entered) {
+      startDecode()
+      return
+    }
+    const fb = window.setTimeout(startDecode, 2500)
+    return () => window.clearTimeout(fb)
+  }, [decoding, entered, startDecode])
 
   const selectedLayer = selectedId != null ? findInTree(tree, selectedId) : null
 
@@ -492,6 +519,10 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const handleExport = useCallback(
     async (format: ExportFormat, scale: number, quality?: number) => {
       if (!selectedLayer || !doc) return
+      if (decoding) {
+        toast(t('图层还在解析中，请稍后导出'), 'warning')
+        return
+      }
       const canvas = renderLayerCanvas(selectedLayer, rnodes, hiddenIds)
       if (!canvas) {
         toast(t('该图层没有可导出的位图内容（文本或空图层）'), 'warning')
@@ -506,7 +537,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       const saved = await window.api.saveImage(`${safeName}@${scale}x.${extOf(format)}`, format, bytes)
       if (saved) toast(t('已导出 {file}', { file: `${safeName}@${scale}x.${extOf(format)}` }))
     },
-    [selectedLayer, doc, rnodes, hiddenIds, toast]
+    [selectedLayer, doc, rnodes, hiddenIds, decoding, toast, t]
   )
 
   const toggleHidden = useCallback(
@@ -546,6 +577,10 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
 
   const exportNodes = useCallback(
     (nodes: PsdLayer[], format: ExportFormat, scales: number[], quality?: number) => {
+      if (decoding) {
+        toast(t('图层还在解析中，请稍后导出'), 'warning')
+        return
+      }
       const items: { name: string; run: () => Promise<Uint8Array | null> }[] = []
       for (const scale of [...scales].sort((a, b) => a - b)) {
         let seq = 0
@@ -571,7 +606,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       }
       return writeAll(items)
     },
-    [rnodes, hiddenIds, template, writeAll]
+    [rnodes, hiddenIds, template, writeAll, decoding, toast, t]
   )
 
   const exportAll = useCallback(
@@ -735,6 +770,10 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const exportSlices = useCallback(
     async (format: ExportFormat, scales0: number[], quality?: number) => {
       if (!doc) return
+      if (decoding) {
+        toast(t('图层还在解析中，请稍后导出'), 'warning')
+        return
+      }
       const targets = selectedSliceIds.size > 0 ? slices.filter((s) => selectedSliceIds.has(s.id)) : slices
       if (targets.length === 0) {
         toast(t('还没有切片，用切片工具在画布上拖拽创建'), 'warning')
@@ -765,7 +804,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       }
       return writeAll(items)
     },
-    [doc, slices, selectedSliceIds, rnodes, hiddenIds, template, writeAll, toast]
+    [doc, slices, selectedSliceIds, rnodes, hiddenIds, template, writeAll, decoding, toast, t]
   )
 
   const handlePickColor = useCallback(
@@ -997,6 +1036,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           rnodes={rnodes}
           canvasMap={canvasMapRef.current}
           hiddenIds={hiddenIds}
+          preview={previewCanvas}
           selectedIds={selectedIds}
           onSelect={handleLayerSelect}
           onLayerContext={handleLayerContext}
