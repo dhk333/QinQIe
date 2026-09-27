@@ -1,7 +1,8 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Menu, protocol } from 'electron'
-import type { MenuItemConstructorOptions } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu, protocol, Tray, Notification, nativeImage } from 'electron'
+import type { MenuItemConstructorOptions, NativeImage } from 'electron'
 import { KEY_COMMANDS, type KeyCommand } from '../shared/keymap'
 import { readFile, writeFile, mkdir, stat, access, readdir, rm } from 'fs/promises'
+import { readFileSync, writeFileSync } from 'fs'
 import { createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { join, basename } from 'path'
@@ -75,6 +76,90 @@ function buildAppMenu(): Menu {
   ])
 }
 
+// ========== 关闭确认与托盘 ==========
+// 导出与解析都跑在渲染进程，直接关窗会中断它们，所以关窗先问一次去向。
+// 「不再询问」落在主进程：渲染层的 localStorage 在「记住 + 立即退出」时来不及 flush。
+type CloseChoice = 'quit' | 'tray'
+
+let closeChoice: CloseChoice | null = null
+let quitting = false
+let tray: Tray | null = null
+
+const closePrefFile = (): string => join(app.getPath('userData'), 'close-pref.json')
+
+function setCloseChoice(action: CloseChoice | null): void {
+  closeChoice = action
+  try {
+    writeFileSync(closePrefFile(), JSON.stringify({ action }), 'utf-8')
+  } catch {
+    // 写失败只影响下次仍会询问，不影响本次关闭
+  }
+}
+
+function loadCloseChoice(): void {
+  try {
+    const v = (JSON.parse(readFileSync(closePrefFile(), 'utf-8')) as { action?: unknown }).action
+    if (v === 'quit' || v === 'tray') closeChoice = v
+  } catch {
+    // 首次运行没有记录
+  }
+}
+
+function trayIcon(): NativeImage {
+  const file = app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(__dirname, '../../build/icon.png')
+  const img = nativeImage.createFromPath(file)
+  return img.isEmpty() ? nativeImage.createEmpty() : img
+}
+
+function showFromTray(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
+function ensureTray(win: BrowserWindow): void {
+  if (tray && !tray.isDestroyed()) return
+  tray = new Tray(trayIcon())
+  tray.setToolTip('轻切')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '显示主窗口', click: () => showFromTray(win) },
+      { type: 'separator' },
+      {
+        label: '退出',
+        click: () => {
+          quitting = true
+          app.quit()
+        }
+      }
+    ])
+  )
+  tray.on('click', () => showFromTray(win))
+}
+
+// Win11 默认把新托盘图标收进溢出区，只靠图标找回窗口不现实，所以隐藏后补一次通知
+let trayHintShown = false
+function notifyHiddenToTray(win: BrowserWindow): void {
+  if (trayHintShown || !Notification.isSupported()) return
+  trayHintShown = true
+  const n = new Notification({ title: '轻切仍在后台运行', body: '正在进行的导出不会中断；点这里恢复窗口' })
+  n.on('click', () => showFromTray(win))
+  n.show()
+}
+
+function applyClose(win: BrowserWindow, action: CloseChoice): void {
+  if (action === 'quit') {
+    quitting = true
+    win.close()
+    return
+  }
+  ensureTray(win)
+  win.hide()
+  notifyHiddenToTray(win)
+}
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1440,
@@ -93,6 +178,13 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow.show())
+
+  mainWindow.on('close', (e) => {
+    if (quitting || mainWindow.webContents.isDestroyed()) return
+    e.preventDefault()
+    if (closeChoice) applyClose(mainWindow, closeChoice)
+    else mainWindow.webContents.send('win:ask-close')
+  })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -135,8 +227,13 @@ function registerPsdFileProtocol(): void {
 
 app.whenReady().then(() => {
   registerPsdFileProtocol()
+  loadCloseChoice()
   Menu.setApplicationMenu(buildAppMenu())
   createWindow()
+})
+
+app.on('before-quit', () => {
+  quitting = true
 })
 
 app.on('window-all-closed', () => {
@@ -160,6 +257,15 @@ ipcMain.on('win:maximize', (e) => {
 ipcMain.on('win:close', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.close()
 })
+// 确认框的两个出口；remember 时把选择落盘，下次关窗直接执行
+ipcMain.on('win:close-choice', (e, action: unknown, remember: boolean) => {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  if (!win || (action !== 'quit' && action !== 'tray')) return
+  if (remember) setCloseChoice(action)
+  applyClose(win, action)
+})
+ipcMain.handle('app:close-pref', (): CloseChoice | null => closeChoice)
+ipcMain.on('app:reset-close-pref', () => setCloseChoice(null))
 
 // ========== 项目数据持久化 ==========
 const projectsFile = (): string => join(app.getPath('userData'), 'projects.json')

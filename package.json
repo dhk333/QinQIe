@@ -1,6 +1,6 @@
 {
   "name": "qingqie",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "轻切 - 前端切图工具",
   "main": "./out/main/index.js",
   "author": "daihongkun",
@@ -35,7 +35,13 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ]
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.9",
