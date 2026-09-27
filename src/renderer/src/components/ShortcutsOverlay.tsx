@@ -23,11 +23,11 @@ export default function ShortcutsOverlay({ onClose }: Props) {
   }, [onClose])
 
   return (
-    <div className="modal-mask" onMouseDown={onClose}>
+    <div id="shortcuts-overlay" className="modal-mask" onMouseDown={onClose}>
       <div className="sc-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="sc-head">
           <h3>{t('快捷键')}</h3>
-          <span className="sc-sub">{t('对齐 MasterGo 画布操作习惯 · 点击键帽可按新按键自定义')}</span>
+          <span className="mt-[3px] block text-[11.5px] text-txt-3">{t('对齐 MasterGo 画布操作习惯 · 点击键帽可按新按键自定义')}</span>
         </div>
         <ShortcutsPanel />
       </div>

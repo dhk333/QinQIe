@@ -957,7 +957,6 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   if (!contentReady || !exitArmed) {
     return (
       <div
-        className="main"
         style={{ position: 'relative', display: 'flex', flex: 1, minHeight: 0 }}
       >
         <div className="psd-loading">{loaderInner}</div>
@@ -967,7 +966,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
 
   return (
     <div
-      className={`main detail${entered ? ' entered' : ''}`}
+      id="page-detail"
+      className={`detail${entered ? ' entered' : ''}`}
       style={{ position: 'relative', display: 'flex', flex: 1, minHeight: 0 }}
     >
       {!loaderGone && (
@@ -982,8 +982,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       )}
       <aside ref={leftRef} className={`panel panel-left${leftCollapsed ? ' collapsed' : ''}`}>
         <div className="panel-head">
-          <span className="label">{t('图 层')}</span>
-          <span className="count">{layerCount}</span>
+          <span className="text-[12px] font-medium tracking-[2px] text-txt-2">{t('图 层')}</span>
+          <span className="text-[11px] text-txt-3">{layerCount}</span>
         </div>
         <LayerTree
           ref={layerTreeRef}

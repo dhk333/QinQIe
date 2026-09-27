@@ -9,6 +9,16 @@ export interface Release {
 /** 与仓库根目录 更新记录.md 保持同一份口径，最新在前 */
 export const RELEASES: Release[] = [
   {
+    version: 'v0.8.7',
+    date: '2026-09-27',
+    title: '样式统一到 Tailwind',
+    points: [
+      '全局样式收敛为单一方案：各页面与组件里零散的自定义类逐批改写为 Tailwind 工具类，界面外观逐像素不变',
+      'styles.css 清除 44 条已失效的样式规则，只保留与状态、伪元素、主题真正联动的部分',
+      '页面与核心组件补上稳定定位锚点（#page-detail、#layer-tree、#properties-panel、#canvas-view 等），排查界面问题可直接定位到元素'
+    ]
+  },
+  {
     version: 'v0.8.6',
     date: '2026-09-27',
     title: '多语言与手动检查更新',

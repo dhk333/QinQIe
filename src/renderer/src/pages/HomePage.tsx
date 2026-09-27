@@ -55,8 +55,8 @@ export default function HomePage({ projects, onOpen, onCreate, onRename, onDelet
   }
 
   return (
-    <main className="home-main">
-      <div className="proj-grid">
+    <main id="page-home" className="flex-1 overflow-auto p-[28px]">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-[18px] max-w-[1440px]">
         {list.map((p, i) => (
           <div
             key={p.id}

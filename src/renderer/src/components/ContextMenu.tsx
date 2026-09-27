@@ -50,6 +50,7 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
   return createPortal(
     <div
       ref={ref}
+      data-c="context-menu"
       className="ctx-menu"
       style={{ left: pos.x, top: pos.y, visibility: pos.ready ? 'visible' : 'hidden' }}
       onContextMenu={(e) => e.preventDefault()}

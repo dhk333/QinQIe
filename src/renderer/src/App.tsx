@@ -125,7 +125,7 @@ export default function App() {
   const loading = projects === null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div id="app-root" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <header className="g-topbar">
         <div className="brand">
           {route.name !== 'home' && (
@@ -142,7 +142,7 @@ export default function App() {
               <BackIcon />
             </span>
           )}
-          <div className="logo">
+          <div className="grid h-[31px] w-[31px] place-items-center rounded-[4px] border border-border bg-panel">
             <AppLogo size={25} />
           </div>
           <span className="name">轻切</span>
@@ -169,7 +169,7 @@ export default function App() {
         </div>
 
         {route.name === 'project' && currentProject && (
-          <span className="pname-wrap" style={{ position: 'relative' }}>
+          <span className="relative">
             <span
               className="pname"
               onClick={(e) => {

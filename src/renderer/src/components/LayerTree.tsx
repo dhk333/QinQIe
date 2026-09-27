@@ -231,7 +231,7 @@ const LayerTree = forwardRef<LayerTreeApi, Props>(function LayerTree(
   }
 
   return (
-    <aside className="flex w-full min-h-0 flex-1 flex-col border-r border-border bg-panel">
+    <aside id="layer-tree" className="flex w-full min-h-0 flex-1 flex-col border-r border-border bg-panel">
       <div className="border-b border-border p-2">
         <div className="flex items-center gap-1.5 rounded-md bg-panel-2 px-2 py-1.5">
           <SearchIcon className="h-3.5 w-3.5 shrink-0 text-txt-3" />

@@ -790,6 +790,7 @@ export default function CanvasView({
 
   return (
     <div
+      id="canvas-view"
       ref={containerRef}
       className="relative flex-1 overflow-hidden bg-bg"
       onMouseDown={onMouseDown}

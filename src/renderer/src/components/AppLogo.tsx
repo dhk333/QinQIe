@@ -19,6 +19,7 @@ export default function AppLogo({ size = 24, animated = false, className }: Prop
   if (animated) {
     return (
       <svg
+        data-c="app-logo"
         className={`logo-draw ${className ?? ''}`}
         viewBox="100 94 320 320"
         width={size}
@@ -35,7 +36,7 @@ export default function AppLogo({ size = 24, animated = false, className }: Prop
     )
   }
   return (
-    <svg className={className} viewBox="100 94 320 320" width={size} height={size}>
+    <svg data-c="app-logo" className={className} viewBox="100 94 320 320" width={size} height={size}>
       <rect x="118" y="118" width="276" height="276" rx="30" fill="var(--logo-sheet)" />
       <rect
         x="118"

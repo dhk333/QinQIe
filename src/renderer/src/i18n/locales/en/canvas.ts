@@ -37,6 +37,7 @@ export default {
   '字距': 'Letter spacing',
   '复制 CSS': 'Copy CSS',
   '导出设置': 'Export',
+  '预览': 'Preview',
   '该图层暂无位图内容': 'No bitmap content for this layer',
   '质量': 'Quality',
   '导出所选图层': 'Export selected layers',
