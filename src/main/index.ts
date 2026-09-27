@@ -1,13 +1,31 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu, protocol } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { KEY_COMMANDS, type KeyCommand } from '../shared/keymap'
 import { readFile, writeFile, mkdir, stat, access, readdir, rm } from 'fs/promises'
+import { createReadStream } from 'fs'
+import { Readable } from 'stream'
 import { join, basename } from 'path'
 import { createHash } from 'crypto'
 import { readPsd, initializeCanvas } from 'ag-psd'
 import { createCanvas } from '@napi-rs/canvas'
 
 initializeCanvas((width, height) => createCanvas(width, height))
+
+// PSD 字节直供协议：渲染层 fetch('psdfile://f/<分段编码路径>') 流式取文件。
+// 替代把 240MB buffer 整体走 invoke 返回（结构化克隆双拷贝 ≈2.3s）。
+// 必须在 app ready 前注册为特权 scheme；仅放行 .psd 后缀。
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'psdfile',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      bypassCSP: true
+    }
+  }
+])
 
 // ========== 应用菜单（与 shared/keymap 同源） ==========
 // 所有自定义项 registerAccelerator:false：键位统一由渲染层按 keymap 处理，
@@ -88,7 +106,35 @@ function createWindow(): void {
   }
 }
 
+// psdfile:// → 本地文件流式响应；渲染层把路径按段 encodeURIComponent（standard scheme 的
+// host 不接受 % 编码，整段塞进单一路径段会被解析成 host 而失败）。
+// 仅放行 .psd 后缀，避免协议变成任意文件读取口子。
+// 不走 net.fetch：其请求受会话代理配置影响（本机代理会重置 file: 请求），直接回文件流
+function registerPsdFileProtocol(): void {
+  protocol.handle('psdfile', (request) => {
+    try {
+      const url = new URL(request.url)
+      const parts = url.pathname.replace(/^\//, '').split('/').map(decodeURIComponent)
+      // 首段带盘符为普通路径；否则视为 UNC（渲染层已去掉前导 \\，这里补回）
+      const filePath = /^[a-zA-Z]:/.test(parts[0] ?? '')
+        ? parts.join('\\')
+        : `\\\\${parts.join('\\')}`
+      if (!filePath.toLowerCase().endsWith('.psd')) {
+        return new Response('forbidden', { status: 403 })
+      }
+      const st = createReadStream(filePath)
+      return new Response(Readable.toWeb(st) as unknown as ReadableStream, {
+        headers: { 'Content-Type': 'application/octet-stream' }
+      })
+    } catch (err) {
+      console.error('[psdfile]', err)
+      return new Response('bad request', { status: 400 })
+    }
+  })
+}
+
 app.whenReady().then(() => {
+  registerPsdFileProtocol()
   Menu.setApplicationMenu(buildAppMenu())
   createWindow()
 })
@@ -250,11 +296,6 @@ ipcMain.handle('psd:pick', async (): Promise<string[]> => {
     filters: PSD_FILTERS
   })
   return canceled ? [] : filePaths
-})
-
-ipcMain.handle('psd:read', async (_e, filePath: string) => {
-  const buffer = await readFile(filePath)
-  return { name: basename(filePath), buffer: new Uint8Array(buffer) }
 })
 
 ipcMain.handle('file:exists', async (_e, p: string): Promise<boolean> => {

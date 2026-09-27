@@ -1,5 +1,6 @@
 import type { ExportFormat, PsdLayer } from '@/types'
 import type { RNode } from './compositor'
+import { readLayerPixels, type LayerBitmap } from './psd'
 import { t } from '@/i18n/core'
 import { cssUnitBase, fmtLen, type CssUnitsPrefs } from './cssUnits'
 import { getUiPrefs } from './uiPrefs'
@@ -35,16 +36,17 @@ export async function exportCanvasBytes(
   return new Uint8Array(await blob.arrayBuffer())
 }
 
-export function sampleColor(canvas: HTMLCanvasElement): string | null {
+export function sampleColor(canvas: LayerBitmap): string | null {
   try {
-    const ctx = canvas.getContext('2d')
-    if (!ctx || canvas.width === 0 || canvas.height === 0) return null
-    const d = ctx.getImageData(
+    if (canvas.width === 0 || canvas.height === 0) return null
+    const d = readLayerPixels(
+      canvas,
       Math.floor(canvas.width / 2),
       Math.floor(canvas.height / 2),
       1,
       1
-    ).data
+    )?.data
+    if (!d) return null
     if (d[3] === 0) return null
     return `#${[d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`.toUpperCase()
   } catch {
