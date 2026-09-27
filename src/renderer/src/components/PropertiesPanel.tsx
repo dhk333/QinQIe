@@ -5,7 +5,7 @@ import { loadExportPrefs } from '@/lib/exportPrefs'
 import { indexRNodes, renderLayerCanvas } from '@/lib/psd'
 import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
-import { CheckIcon, CopyIcon } from './icons'
+import { CheckIcon, ChevronRightIcon, CopyIcon } from './icons'
 import Slider from './Slider'
 
 interface Props {
@@ -24,6 +24,71 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       {children}
     </section>
   )
+}
+
+/** 可折叠分组：标题行即开关，收起时只保留标题与当前设置摘要 */
+function CollapsibleSection({
+  id,
+  title,
+  open,
+  onToggle,
+  summary,
+  children
+}: {
+  id: string
+  title: string
+  open: boolean
+  onToggle: () => void
+  summary: string
+  children: React.ReactNode
+}) {
+  return (
+    <section id={id} className="border-b border-border px-4">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 py-3.5 text-left"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        <ChevronRightIcon
+          className={`h-3 w-3 shrink-0 text-txt-3 transition-transform duration-200 ease-[var(--ease)] ${open ? 'rotate-90' : ''}`}
+        />
+        <span className="text-[12px] font-semibold text-txt">{title}</span>
+        <span
+          className={`ml-auto font-mono text-[11px] text-txt-3 transition-opacity duration-200 ${open ? 'opacity-0' : ''}`}
+        >
+          {summary}
+        </span>
+      </button>
+      <Collapse open={open}>
+        <div className="pb-4">{children}</div>
+      </Collapse>
+    </section>
+  )
+}
+
+/** 高度可中断的展开收起：0fr↔1fr 过渡，不逐帧测量内容 */
+function Collapse({ open, children }: { open: boolean; children: React.ReactNode }) {
+  return (
+    <div
+      className={`grid transition-[grid-template-rows] duration-200 ease-[var(--ease)] ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+    >
+      {/* 收起动画结束后再隐藏：避免不可见内容仍可聚焦与点击 */}
+      <div
+        className={`min-h-0 overflow-hidden transition-[visibility] duration-0 ${open ? 'visible delay-0' : 'invisible delay-200'}`}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function optCls(on: boolean): string {
+  return `flex-1 cursor-pointer rounded-md border px-2 py-1.5 text-[12px] transition-colors ${
+    on
+      ? 'border-accent bg-accent-dim text-txt'
+      : 'border-border bg-panel-2 text-txt-2 hover:border-border-light'
+  }`
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -93,6 +158,9 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
   const [scale, setScale] = useState(() => loadExportPrefs().scales[0])
   const [quality, setQuality] = useState(() => loadExportPrefs().quality)
   const [copied, setCopied] = useState<'css' | 'color' | 'text' | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewSeen, setPreviewSeen] = useState(false)
 
   const rnodeMap = useMemo(() => indexRNodes(rnodes), [rnodes])
   const rnode = layer ? rnodeMap.get(layer.id) : undefined
@@ -109,7 +177,8 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
     [layer, color, rnode, getLang()]
   )
   const previewUrl = useMemo(() => {
-    if (!layer || !doc) return null
+    // 合成整层位图代价高：用户从未展开过预览就完全不跑
+    if (!previewSeen || !layer || !doc) return null
     try {
       const c = renderLayerCanvas(layer, rnodes, hiddenIds)
       if (!c || !c.width || !c.height) return null
@@ -117,7 +186,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
     } catch {
       return null
     }
-  }, [layer, doc, rnodes, hiddenIds])
+  }, [previewSeen, layer, doc, rnodes, hiddenIds])
 
   if (!layer) {
     return (
@@ -140,6 +209,10 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
 
   const typeLabel =
     layer.type === 'group' ? t('图层组') : layer.isText ? t('文本图层') : t('像素图层')
+
+  const exportSummary = `${{ png: 'PNG', jpeg: 'JPG', webp: 'WebP' }[format]} · @${scale}x${
+    format === 'png' ? '' : ` · ${Math.round(quality * 100)}%`
+  }`
 
   return (
     <aside id="properties-panel" className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto bg-panel">
@@ -254,15 +327,14 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
         </div>
       </Section>
 
-      <Section title={t('导出设置')}>
-        <div className="layer-preview">
-          {previewUrl ? (
-            <img src={previewUrl} alt="" />
-          ) : (
-            <span>{t('该图层暂无位图内容')}</span>
-          )}
-        </div>
-        <div className="mb-3 flex gap-1.5">
+      <CollapsibleSection
+        id="export-section"
+        title={t('导出')}
+        open={exportOpen}
+        onToggle={() => setExportOpen((v) => !v)}
+        summary={exportSummary}
+      >
+        <div className="mb-2.5 flex gap-1.5">
           {(
             [
               ['png', 'PNG'],
@@ -270,36 +342,20 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
               ['webp', 'WebP']
             ] as [ExportFormat, string][]
           ).map(([f, label]) => (
-            <button
-              key={f}
-              onClick={() => setFormat(f)}
-              className={`flex-1 cursor-pointer rounded-md border px-2 py-1.5 text-[12px] transition-colors ${
-                format === f
-                  ? 'border-accent bg-accent-dim text-txt'
-                  : 'border-border bg-panel-2 text-txt-2 hover:border-border-light'
-              }`}
-            >
+            <button key={f} onClick={() => setFormat(f)} className={optCls(format === f)}>
               {label}
             </button>
           ))}
         </div>
-        <div className="mb-3 flex gap-1.5">
+        <div className="mb-2.5 flex gap-1.5">
           {[1, 2, 3].map((s) => (
-            <button
-              key={s}
-              onClick={() => setScale(s)}
-              className={`flex-1 cursor-pointer rounded-md border px-2 py-1.5 text-[12px] transition-colors ${
-                scale === s
-                  ? 'border-accent bg-accent-dim text-txt'
-                  : 'border-border bg-panel-2 text-txt-2 hover:border-border-light'
-              }`}
-            >
+            <button key={s} onClick={() => setScale(s)} className={optCls(scale === s)}>
               @{s}x
             </button>
           ))}
         </div>
         {format !== 'png' && (
-          <div className="mb-3 flex items-center gap-2">
+          <div className="mb-2.5 flex items-center gap-2">
             <span className="text-[11px] text-txt-3">{t('质量')}</span>
             <Slider
               min={0.5}
@@ -308,17 +364,44 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
               value={quality}
               onChange={setQuality}
             />
-            <b className="font-mono text-[11px] text-txt-2">{Math.round(quality * 100)}%</b>
+            <b className="w-9 shrink-0 text-right font-mono text-[11px] text-txt-2">
+              {Math.round(quality * 100)}%
+            </b>
           </div>
         )}
+
         <button
-          className="btn btn-primary"
-          style={{ width: '100%' }}
+          type="button"
+          className="flex w-full items-center gap-1.5 py-1.5 text-left"
+          onClick={() => {
+            const next = !previewOpen
+            setPreviewOpen(next)
+            if (next) setPreviewSeen(true)
+          }}
+          aria-expanded={previewOpen}
+        >
+          <ChevronRightIcon
+            className={`h-3 w-3 shrink-0 text-txt-3 transition-transform duration-200 ease-[var(--ease)] ${previewOpen ? 'rotate-90' : ''}`}
+          />
+          <span className="text-[11.5px] text-txt-2">{t('预览')}</span>
+        </button>
+        <Collapse open={previewOpen}>
+          <div id="layer-preview" className="layer-preview">
+            {previewUrl ? (
+              <img src={previewUrl} alt="" />
+            ) : (
+              <span>{t('该图层暂无位图内容')}</span>
+            )}
+          </div>
+        </Collapse>
+
+        <button
+          className="btn btn-primary mt-1.5 w-full"
           onClick={() => onExport(format, scale, format === 'png' ? undefined : quality)}
         >
           {t('导出所选图层')}
         </button>
-      </Section>
+      </CollapsibleSection>
     </aside>
   )
 }
