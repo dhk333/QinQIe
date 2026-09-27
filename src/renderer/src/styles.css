@@ -502,8 +502,11 @@ body {
 }
 .art-layout-btn svg { width: 16px; height: 16px; }
 .art-layout-btn:hover { color: var(--accent-2); border-color: var(--accent); }
+/* 空态父容器需单向排布，自动外边距才能在纵轴分到空白 */
+#page-home:has(.art-empty) { display: flex; flex-direction: column; }
+.art-flow:has(.art-empty) { flex-wrap: nowrap; padding: 30px; }
 .art-empty {
-  margin: 48px auto 0; max-width: 420px;
+  margin: auto; max-width: 420px;
   display: flex; flex-direction: column; align-items: center;
   text-align: center; padding: 24px 20px;
 }
