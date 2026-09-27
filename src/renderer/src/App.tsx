@@ -313,7 +313,10 @@ export default function App() {
                 })
               }}
               onDelete={(id) => {
-                persist((list) => list.filter((x) => x.id !== id))
+                persist((list) => {
+                  const i = list.findIndex((x) => x.id === id)
+                  if (i >= 0) list.splice(i, 1)
+                })
               }}
             />
           )}

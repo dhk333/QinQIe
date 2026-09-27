@@ -137,11 +137,13 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
   useEffect(() => {
     if (!running || !step) return
     nodeRef.current = null
-    const want = routeFor(step.page, projectsRef.current, location.hash)
+    // 冷启动时 location.hash 是空串，而路由按 '#/home' 渲染；直接比较会让本效果导航后再也不重跑，第一步永远量不到目标
+    const cur = location.hash || '#/home'
+    const want = routeFor(step.page, projectsRef.current, cur)
     // 换步时先收掉上一个目标的高亮，避免气泡还指着旧元素
     applyBox(null)
     setCentered(false)
-    if (want && location.hash !== want) {
+    if (want && cur !== want) {
       navigate(want)
       return
     }
