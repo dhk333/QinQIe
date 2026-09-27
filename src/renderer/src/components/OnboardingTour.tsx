@@ -23,6 +23,16 @@ interface Box {
   height: number
 }
 
+const HALT_TITLE = '先去建项目、传第一份 PSD'
+const HALT_DESC = '剩下的图层树、画布与导出，要对着设计稿讲才看得懂。传好后随时能在「设置 → 关于轻切」里重放引导。'
+
+/** 页面由浅到深；用户自己走到了更深的页，说明前面那步已经做完了 */
+const PAGE_DEPTH: Record<TourPage, number> = { home: 0, project: 1, detail: 2 }
+
+function hashDepth(hash: string): number {
+  return hash.startsWith('#/detail/') ? 2 : hash.startsWith('#/project/') ? 1 : 0
+}
+
 function pickProject(projects: Project[], hash: string): Project | undefined {
   const m = /^#\/(?:project|detail)\/([^/]+)/.exec(hash)
   return (m && projects.find((p) => p.id === m[1])) || projects[0]
@@ -78,11 +88,13 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
   const [index, setIndex] = useState(0)
   const [box, setBox] = useState<Box | null>(null)
   const [centered, setCentered] = useState(false)
+  const [halted, setHalted] = useState(false)
   const [bubbleH, setBubbleH] = useState(150)
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight })
   const bubbleRef = useRef<HTMLDivElement>(null)
   const nodeRef = useRef<Element | null>(null)
   const boxRef = useRef<Box | null>(null)
+  const manualRef = useRef<number | null>(null)
   const projectsRef = useRef(projects)
   projectsRef.current = projects
 
@@ -124,7 +136,10 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
       if (delta > 0 && waiting) return
       const next = index + delta
       if (next >= TOUR_STEPS.length) finish()
-      else setIndex(Math.max(0, next))
+      else {
+        manualRef.current = Math.max(0, next)
+        setIndex(Math.max(0, next))
+      }
     },
     [index, waiting, finish]
   )
@@ -143,11 +158,24 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
     // 换步时先收掉上一个目标的高亮，避免气泡还指着旧元素
     applyBox(null)
     setCentered(false)
-    if (want && cur !== want) {
+    if (want === null) {
+      // 没数据就走不到后面的页，与其连排五个没有高亮的气泡，不如当场收尾
+      setHalted(true)
+      setCentered(true)
+      return
+    }
+    setHalted(false)
+    if (hashDepth(cur) > PAGE_DEPTH[step.page] && manualRef.current !== index) {
+      // 用户自己把这一步的动作做完了（刚建好项目、已进详情页），就顺着往下讲，别把人拽回上一步的页面
+      setIndex(Math.min(index + 1, TOUR_STEPS.length - 1))
+      return
+    }
+    manualRef.current = null
+    if (cur !== want) {
       navigate(want)
       return
     }
-    if (!step.anchor || want === null) {
+    if (!step.anchor) {
       setCentered(true)
       return
     }
@@ -184,7 +212,7 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
     })
     tick()
     return () => cleanups.forEach((f) => f())
-  }, [running, step, hash, measure, applyBox])
+  }, [running, step, hash, index, measure, applyBox])
 
   useEffect(() => {
     if (!running) return
@@ -223,7 +251,8 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
   const pos = box
     ? place(box, bubbleH, vp.w, vp.h, dragBand())
     : { left: (vp.w - BUBBLE_W) / 2, top: (vp.h - bubbleH) / 2 }
-  const last = index === TOUR_STEPS.length - 1
+  // 数据不够走不到后面的页时，就地把手头这段讲完，不留一个点了没反应的「下一步」
+  const done = halted || index === TOUR_STEPS.length - 1
 
   return createPortal(
     <div id="onboarding-tour" className="pointer-events-none fixed inset-0 z-[10000] select-text">
@@ -257,7 +286,7 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
           <span className="pt-[2px] font-mono text-[11px] text-accent-2">
             {index + 1}/{TOUR_STEPS.length}
           </span>
-          <b className="flex-1 text-[13px] font-semibold text-txt">{t(step.title)}</b>
+          <b className="flex-1 text-[13px] font-semibold text-txt">{halted ? t(HALT_TITLE) : t(step.title)}</b>
           <button
             className="-mr-1 -mt-1 grid h-[22px] w-[22px] place-items-center rounded-[4px] text-[14px] text-txt-3 hover:bg-panel-3 hover:text-txt"
             title={t('结束引导')}
@@ -266,7 +295,7 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
             ×
           </button>
         </div>
-        <p className="mt-[6px] text-[12px] leading-[19px] text-txt-2">{t(step.desc)}</p>
+        <p className="mt-[6px] text-[12px] leading-[19px] text-txt-2">{halted ? t(HALT_DESC) : t(step.desc)}</p>
         <div className="mt-[12px] flex items-center gap-2">
           <div className="flex flex-1 gap-[5px]">
             {TOUR_STEPS.map((s, i) => (
@@ -287,11 +316,11 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
           )}
           <button
             className="btn btn-primary"
-            onClick={() => go(1)}
+            onClick={() => (done ? finish() : go(1))}
             disabled={waiting}
             title={waiting ? t('加载中…') : undefined}
           >
-            {last ? t('完成') : t('下一步')}
+            {done ? t('完成') : t('下一步')}
           </button>
         </div>
       </div>

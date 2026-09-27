@@ -24,5 +24,8 @@ export default {
   '下一步': 'Next',
   '完成': 'Done',
   '重放新手引导': 'Replay the guided tour',
-  '从建项目到批量导出的完整流程演示': 'A walkthrough from creating a project to batch export'
+  '从建项目到批量导出的完整流程演示': 'A walkthrough from creating a project to batch export',
+  '先去建项目、传第一份 PSD': 'Create a project and upload your first PSD',
+  '剩下的图层树、画布与导出，要对着设计稿讲才看得懂。传好后随时能在「设置 → 关于轻切」里重放引导。':
+    'The layer tree, canvas and export steps only make sense next to a real design file. Once one is uploaded you can replay the tour from Settings → About.'
 }
