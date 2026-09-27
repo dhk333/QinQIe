@@ -1,6 +1,8 @@
 import { RELEASES } from '@/lib/changelog'
+import { useT } from '@/i18n/core'
 
 export default function ChangelogPage() {
+  const t = useT()
   return (
     <main className="changelog-main">
       <div className="cl-list">
@@ -14,7 +16,7 @@ export default function ChangelogPage() {
             <div>
               <header className="cl-head">
                 <h3 className="cl-title">{r.title}</h3>
-                {i === 0 && <span className="cl-cur">当前版本</span>}
+                {i === 0 && <span className="cl-cur">{t('当前版本')}</span>}
               </header>
               <ul className="cl-points">
                 {r.points.map((p) => (

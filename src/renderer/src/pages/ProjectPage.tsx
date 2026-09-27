@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Project, ProjectPsd } from '@/types'
 import { genId } from '@/lib/projects'
 import { useDialog, useToast } from '@/lib/ui'
+import { useT } from '@/i18n/core'
 import { FolderIcon } from '@/components/icons'
 import PsdThumb from '@/components/PsdThumb'
 
@@ -69,9 +70,11 @@ async function importPaths(paths: string[]): Promise<{ ok: ProjectPsd[]; failed:
 }
 
 export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUpload }: Props) {
+  const t = useT()
   const [selectedGroup, setSelectedGroup] = useState<string>('all')
   const [dragOverGrp, setDragOverGrp] = useState<string | null>(null)
   const [grpCollapsed, setGrpCollapsed] = useState(false)
+  const [q, setQ] = useState('')
   const [stripMode, setStripMode] = useState(() => localStorage.getItem('qc-art-layout') === 'strip')
   const toggleLayout = () =>
     setStripMode((v) => {
@@ -93,7 +96,7 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
     const existing = new Set(project.psds.map((p) => p.path))
     const fresh = target.filter((p) => !existing.has(p))
     if (!fresh.length) {
-      toast('所选文件已在项目中', 'warning')
+      toast(t('所选文件已在项目中'), 'warning')
       return
     }
     const groupId = selectedGroup !== 'all' && selectedGroup !== 'ungrouped' ? selectedGroup : null
@@ -104,8 +107,8 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
         p.psds.push(item)
       }
     })
-    if (failed.length) toast(`${failed.length} 个文件解析失败`, 'error')
-    if (ok.length) toast(`已添加 ${ok.length} 个 PSD`)
+    if (failed.length) toast(t('{n} 个文件解析失败', { n: failed.length }), 'error')
+    if (ok.length) toast(t('已添加 {n} 个 PSD', { n: ok.length }))
   }
 
   useEffect(() => {
@@ -115,32 +118,32 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
 
   // 分组操作
   const handleAddGroup = async () => {
-    const name = await dialog({ type: 'prompt', title: '新建分组', placeholder: '分组名称' })
+    const name = await dialog({ type: 'prompt', title: t('新建分组'), placeholder: t('分组名称') })
     if (!name || typeof name !== 'string') return
     if (project.groups.some((g) => g.name === name)) {
-      toast('分组名称已存在', 'warning')
+      toast(t('分组名称已存在'), 'warning')
       return
     }
     const id = genId('g')
     onUpdate((p) => p.groups.push({ id, name }))
     setSelectedGroup(id)
-    toast(`已创建分组「${name}」`)
+    toast(t('已创建分组「{name}」', { name }))
   }
 
   const handleRenameGroup = async (gId: string) => {
     const target = project.groups.find((g) => g.id === gId)
     if (!target) return
-    const name = await dialog({ type: 'prompt', title: '重命名分组', value: target.name })
+    const name = await dialog({ type: 'prompt', title: t('重命名分组'), value: target.name })
     if (!name || typeof name !== 'string' || name === target.name) return
     if (project.groups.some((g) => g.name === name && g.id !== gId)) {
-      toast('分组名称已存在', 'warning')
+      toast(t('分组名称已存在'), 'warning')
       return
     }
     onUpdate((p) => {
-      const t = p.groups.find((g) => g.id === gId)
-      if (t) t.name = name
+      const grp = p.groups.find((g) => g.id === gId)
+      if (grp) grp.name = name
     })
-    toast('已重命名')
+    toast(t('已重命名'))
   }
 
   const handleDeleteGroup = async (gId: string) => {
@@ -149,9 +152,9 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
     const cnt = project.psds.filter((p) => p.groupId === gId).length
     const ok = await dialog({
       type: 'confirm',
-      title: `删除分组「${target.name}」`,
-      desc: cnt ? `分组内的 ${cnt} 个画板将移入「未分组」` : '该分组为空，确定删除吗？',
-      okText: '删除',
+      title: t('删除分组「{name}」', { name: target.name }),
+      desc: cnt ? t('分组内的 {n} 个画板将移入「未分组」', { n: cnt }) : t('该分组为空，确定删除吗？'),
+      okText: t('删除'),
       danger: true
     })
     if (!ok) return
@@ -162,32 +165,32 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
       p.groups = p.groups.filter((g) => g.id !== gId)
     })
     if (selectedGroup === gId) setSelectedGroup('all')
-    toast(`已删除分组「${target.name}」`)
+    toast(t('已删除分组「{name}」', { name: target.name }))
   }
 
   const handleDeletePsd = async (psd: ProjectPsd) => {
     const ok = await dialog({
       type: 'confirm',
-      title: `删除「${psd.name}」`,
-      desc: '只从项目中移除记录，不会删除本地文件',
-      okText: '删除',
+      title: t('删除「{name}」', { name: psd.name }),
+      desc: t('只从项目中移除记录，不会删除本地文件'),
+      okText: t('删除'),
       danger: true
     })
     if (!ok) return
     onUpdate((p) => {
       p.psds = p.psds.filter((s) => s.id !== psd.id)
     })
-    toast(`已删除「${psd.name}」`)
+    toast(t('已删除「{name}」', { name: psd.name }))
   }
 
   const handleRenamePsd = async (psd: ProjectPsd) => {
-    const name = await dialog({ type: 'prompt', title: '重命名 PSD', value: psd.name })
+    const name = await dialog({ type: 'prompt', title: t('重命名 PSD'), value: psd.name })
     if (!name || typeof name !== 'string' || name === psd.name) return
     onUpdate((p) => {
       const s = p.psds.find((x) => x.id === psd.id)
       if (s) s.name = name
     })
-    toast('已重命名')
+    toast(t('已重命名'))
   }
 
   // 拖拽归类
@@ -234,8 +237,17 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, project.psds.length])
 
-  const list = project.psds.filter((s) =>
+  const query = q.trim().toLowerCase()
+  const inGroup = (s: ProjectPsd) =>
     selectedGroup === 'all' ? true : selectedGroup === 'ungrouped' ? !s.groupId : s.groupId === selectedGroup
+  const list = project.psds.filter(
+    (s) => inGroup(s) && (!query || s.name.toLowerCase().includes(query))
+  )
+  const visibleGroups = project.groups.filter(
+    (g) =>
+      !query ||
+      g.name.toLowerCase().includes(query) ||
+      project.psds.some((s) => s.groupId === g.id && s.name.toLowerCase().includes(query))
   )
   const cnt = (g: string) =>
     project.psds.filter((s) =>
@@ -247,11 +259,18 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
   return (
     <div className={`proj-body${grpCollapsed ? ' grp-collapsed' : ''}`}>
       <aside className={`group-panel${grpCollapsed ? ' collapsed' : ''}`}>
+        <input
+          className="grp-search"
+          type="text"
+          placeholder={t('搜索分组 / 设计稿')}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
         <span className={grpClass('all')} onClick={() => setSelectedGroup('all')}>
           {AllIcon}
-          全部<span className="cnt">{cnt('all')}</span>
+          {t('全部')}<span className="cnt">{cnt('all')}</span>
         </span>
-        {project.groups.map((g) => (
+        {visibleGroups.map((g) => (
           <span
             key={g.id}
             className={grpClass(g.id)}
@@ -264,8 +283,8 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
             {g.name}
             <span className="cnt">{cnt(g.id)}</span>
             <span className="g-ops">
-              <span title="重命名分组" onClick={(e) => { e.stopPropagation(); void handleRenameGroup(g.id) }}>✎</span>
-              <span title="删除分组" onClick={(e) => { e.stopPropagation(); void handleDeleteGroup(g.id) }}>✕</span>
+              <span title={t('重命名分组')} onClick={(e) => { e.stopPropagation(); void handleRenameGroup(g.id) }}>✎</span>
+              <span title={t('删除分组')} onClick={(e) => { e.stopPropagation(); void handleDeleteGroup(g.id) }}>✕</span>
             </span>
           </span>
         ))}
@@ -274,13 +293,13 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
           onDragLeave={() => setDragOverGrp(null)}
           onDrop={(e) => onGroupDrop(e, 'ungrouped')}>
           {FolderSvg}
-          未分组<span className="cnt">{cnt('ungrouped')}</span>
+          {t('未分组')}<span className="cnt">{cnt('ungrouped')}</span>
         </span>
-        <span className="grp-add" onClick={() => void handleAddGroup()}>＋ 新建分组</span>
+        <span className="grp-add" onClick={() => void handleAddGroup()}>＋ {t('新建分组')}</span>
       </aside>
       <span
         className="gp-chev"
-        title={grpCollapsed ? '展开分组栏' : '收起分组栏'}
+        title={grpCollapsed ? t('展开分组栏') : t('收起分组栏')}
         onClick={() => setGrpCollapsed((v) => !v)}
       >
         {grpCollapsed ? '›' : '‹'}
@@ -288,7 +307,7 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
 
       <button
         className="icon-btn art-layout-btn"
-        title={stripMode ? '切换为网格布局' : '切换为横向滚动布局'}
+        title={stripMode ? t('切换为网格布局') : t('切换为横向滚动布局')}
         onClick={toggleLayout}
       >
         {stripMode ? GridLayoutIcon : StripLayoutIcon}
@@ -314,18 +333,28 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
       >
         {list.length === 0 ? (
           <div className="art-empty">
+            {query ? (
+              <>
+                <h4>{t('没有匹配「{q}」的设计稿', { q: q.trim() })}</h4>
+                <p>{t('换个关键词试试，或清空搜索查看全部')}</p>
+                <button className="btn btn-ghost" onClick={() => setQ('')}>{t('清空搜索')}</button>
+              </>
+            ) : (
+            <>
             <div className="empty-stack"><i /><i /></div>
             {selectedGroup === 'all' ? (
               <>
-                <h4>项目还没有设计稿</h4>
-                <p>点击右上角「上传 PSD」<br />或把 PSD 文件直接拖到这里</p>
+                <h4>{t('项目还没有设计稿')}</h4>
+                <p>{t('点击右上角「上传 PSD」')}<br />{t('或把 PSD 文件直接拖到这里')}</p>
               </>
             ) : (
               <>
-                <h4>该分组还没有画板</h4>
-                <p>把「全部」里的画板拖到左侧分组上即可归类</p>
-                <button className="btn btn-ghost" onClick={() => setSelectedGroup('all')}>查看全部画板</button>
+                <h4>{t('该分组还没有画板')}</h4>
+                <p>{t('把「全部」里的画板拖到左侧分组上即可归类')}</p>
+                <button className="btn btn-ghost" onClick={() => setSelectedGroup('all')}>{t('查看全部画板')}</button>
               </>
+            )}
+            </>
             )}
           </div>
         ) : (
@@ -344,14 +373,14 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
               onDragStart={(e) => onCardDragStart(e, psd)}
               onClick={() => {
                 if (!psd.missing) onOpenPsd(psd)
-                else toast('文件丢失，请先重新定位', 'warning')
+                else toast(t('文件丢失，请先重新定位'), 'warning')
               }}
             >
               <div className={`art-thumb${psd.missing ? ' missing' : ''}`} style={{ height: stripMode ? '560px' : '250px' }}>
                 <PsdThumb thumbPath={psd.thumbPath} kind="thumb" />
                 <span className="ops">
-                  <span title="重命名" onClick={(e) => { e.stopPropagation(); void handleRenamePsd(psd) }}>✎</span>
-                  <span title="删除此 PSD" onClick={(e) => { e.stopPropagation(); void handleDeletePsd(psd) }}>✕</span>
+                  <span title={t('重命名')} onClick={(e) => { e.stopPropagation(); void handleRenamePsd(psd) }}>✎</span>
+                  <span title={t('删除此 PSD')} onClick={(e) => { e.stopPropagation(); void handleDeletePsd(psd) }}>✕</span>
                 </span>
               </div>
               <div className="art-name">

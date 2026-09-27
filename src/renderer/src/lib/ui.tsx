@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useT } from '@/i18n/core'
 
 // ========== Toast ==========
 type ToastType = 'success' | 'warning' | 'error'
@@ -53,6 +54,7 @@ interface DialogState {
 }
 
 function DialogModal({ state, onClose }: { state: DialogState; onClose: (v: string | null | boolean) => void }) {
+  const t = useT()
   const { opts } = state
   const isPrompt = opts.type !== 'confirm'
   const [value, setValue] = useState(opts.value ?? '')
@@ -122,7 +124,7 @@ function DialogModal({ state, onClose }: { state: DialogState; onClose: (v: stri
         )}
         <div className="row2">
           <button className="btn btn-ghost" onClick={() => close(isPrompt ? null : false)}>
-            取消
+            {t('取消')}
           </button>
           <button
             ref={okRef}
@@ -130,7 +132,7 @@ function DialogModal({ state, onClose }: { state: DialogState; onClose: (v: stri
             disabled={okDisabled}
             onClick={submit}
           >
-            {opts.okText ?? '确定'}
+            {opts.okText ?? t('确定')}
           </button>
         </div>
       </div>

@@ -3,6 +3,7 @@ import type { ExportFormat, PsdDoc, PsdLayer } from '@/types'
 import { blendLabel, layerCssSnippet, layerEffectNames, sampleColor } from '@/lib/export'
 import { loadExportPrefs } from '@/lib/exportPrefs'
 import { indexRNodes, renderLayerCanvas } from '@/lib/psd'
+import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
 import { CheckIcon, CopyIcon } from './icons'
 import Slider from './Slider'
@@ -87,6 +88,7 @@ function CssCode({ css }: { css: string }) {
 }
 
 export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenIds, onExport }: Props) {
+  const t = useT()
   const [format, setFormat] = useState<ExportFormat>(() => loadExportPrefs().format)
   const [scale, setScale] = useState(() => loadExportPrefs().scales[0])
   const [quality, setQuality] = useState(() => loadExportPrefs().quality)
@@ -101,7 +103,11 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
     },
     [layer, canvasMap]
   )
-  const css = useMemo(() => (layer ? layerCssSnippet(layer, color, rnode) : ''), [layer, color, rnode])
+  const css = useMemo(
+    () => (layer ? layerCssSnippet(layer, color, rnode) : ''),
+    // getLang(): CSS 注释内嵌展示标签，语言切换后需重新生成
+    [layer, color, rnode, getLang()]
+  )
   const previewUrl = useMemo(() => {
     if (!layer || !doc) return null
     try {
@@ -117,10 +123,10 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
     return (
       <aside className="flex w-full min-h-0 flex-1 flex-col bg-panel">
         <div className="flex h-10 shrink-0 items-center border-b border-border px-4 text-[12.5px] font-semibold text-txt">
-          属性
+          {t('属性')}
         </div>
         <p className="px-4 py-6 text-center text-[12px] text-txt-3">
-          在画布或图层面板中选择图层
+          {t('在画布或图层面板中选择图层')}
         </p>
       </aside>
     )
@@ -132,36 +138,37 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
     setTimeout(() => setCopied(null), 1200)
   }
 
-  const typeLabel = layer.type === 'group' ? '图层组' : layer.isText ? '文本图层' : '像素图层'
+  const typeLabel =
+    layer.type === 'group' ? t('图层组') : layer.isText ? t('文本图层') : t('像素图层')
 
   return (
     <aside className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto bg-panel">
       <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center border-b border-border bg-panel px-4 text-[12.5px] font-semibold text-txt">
-        属性
+        {t('属性')}
       </div>
 
-      <Section title="图层">
+      <Section title={t('图层')}>
         <p className="mb-2 truncate text-[13px] font-medium text-txt" title={layer.name}>
           {layer.name}
         </p>
-        <InfoRow label="类型" value={typeLabel} />
-        <InfoRow label="位置" value={`X ${layer.left}, Y ${layer.top}`} />
-        <InfoRow label="尺寸" value={`${layer.width} × ${layer.height}`} />
-        <InfoRow label="不透明度" value={`${Math.round(layer.opacity * 100)}%`} />
+        <InfoRow label={t('类型')} value={typeLabel} />
+        <InfoRow label={t('位置')} value={`X ${layer.left}, Y ${layer.top}`} />
+        <InfoRow label={t('尺寸')} value={`${layer.width} × ${layer.height}`} />
+        <InfoRow label={t('不透明度')} value={`${Math.round(layer.opacity * 100)}%`} />
         {rnode && rnode.fillOpacity < 0.999 && (
-          <InfoRow label="填充不透明度" value={`${Math.round(rnode.fillOpacity * 100)}%`} />
+          <InfoRow label={t('填充不透明度')} value={`${Math.round(rnode.fillOpacity * 100)}%`} />
         )}
-        <InfoRow label="混合模式" value={blendLabel(layer.blendMode)} />
-        {layer.clipping && <InfoRow label="剪贴蒙版" value="是" />}
-        {rnode?.mask && !rnode.mask.disabled && <InfoRow label="图层蒙版" value="有" />}
+        <InfoRow label={t('混合模式')} value={blendLabel(layer.blendMode)} />
+        {layer.clipping && <InfoRow label={t('剪贴蒙版')} value={t('是')} />}
+        {rnode?.mask && !rnode.mask.disabled && <InfoRow label={t('图层蒙版')} value={t('有')} />}
         {layerEffectNames(rnode).length > 0 && (
-          <InfoRow label="图层样式" value={layerEffectNames(rnode).join('、')} />
+          <InfoRow label={t('图层样式')} value={layerEffectNames(rnode).join(t('、'))} />
         )}
-        {layer.hidden && <InfoRow label="可见性" value="已隐藏" />}
+        {layer.hidden && <InfoRow label={t('可见性')} value={t('已隐藏')} />}
       </Section>
 
       {color && (
-        <Section title="取色">
+        <Section title={t('取色')}>
           <button
             className="flex w-full items-center gap-2.5 rounded-lg border border-border bg-panel-2 px-3 py-2 transition-colors hover:border-border-light"
             onClick={() => copy(color, 'color')}
@@ -181,11 +188,11 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
       )}
 
       {layer.textInfo && (
-        <Section title="文本">
+        <Section title={t('文本')}>
           <div className="text-box" onClick={() => void copy(layer.textInfo!.content, 'text')}>
             <button
               className="cp"
-              title="复制文本"
+              title={t('复制文本')}
               onClick={(e) => {
                 e.stopPropagation()
                 void copy(layer.textInfo!.content, 'text')
@@ -197,11 +204,11 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
           </div>
           <div style={{ marginTop: 8 }}>
             {layer.textInfo.fontSize != null && (
-              <InfoRow label="字体大小" value={`${layer.textInfo.fontSize} px`} />
+              <InfoRow label={t('字体大小')} value={`${layer.textInfo.fontSize} px`} />
             )}
             {layer.textInfo.color && (
               <div className="flex items-center justify-between py-1">
-                <span className="text-[11.5px] text-txt-3">字体颜色</span>
+                <span className="text-[11.5px] text-txt-3">{t('字体颜色')}</span>
                 <span
                   className="flex items-center gap-1.5 font-mono text-[11px] text-txt"
                   style={{ cursor: 'pointer' }}
@@ -215,14 +222,14 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
                 </span>
               </div>
             )}
-            {layer.textInfo.fontWeight && <InfoRow label="字重" value={layer.textInfo.fontWeight} />}
-            {layer.textInfo.fontFamily && <InfoRow label="字体" value={layer.textInfo.fontFamily} />}
+            {layer.textInfo.fontWeight && <InfoRow label={t('字重')} value={layer.textInfo.fontWeight} />}
+            {layer.textInfo.fontFamily && <InfoRow label={t('字体')} value={layer.textInfo.fontFamily} />}
             {layer.textInfo.leading != null && (
-              <InfoRow label="行距" value={`${Math.round(layer.textInfo.leading * 10) / 10} px`} />
+              <InfoRow label={t('行距')} value={`${Math.round(layer.textInfo.leading * 10) / 10} px`} />
             )}
             {layer.textInfo.tracking != null && layer.textInfo.tracking !== 0 && (
               <InfoRow
-                label="字距"
+                label={t('字距')}
                 value={`${Math.round(layer.textInfo.tracking) / 1000} em`}
               />
             )}
@@ -234,7 +241,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
         <div className="relative rounded-lg border border-border bg-panel-2">
           <button
             className="icon-btn absolute right-1.5 top-1.5"
-            title="复制 CSS"
+            title={t('复制 CSS')}
             onClick={() => copy(css, 'css')}
           >
             {copied === 'css' ? (
@@ -247,12 +254,12 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
         </div>
       </Section>
 
-      <Section title="导出设置">
+      <Section title={t('导出设置')}>
         <div className="layer-preview">
           {previewUrl ? (
             <img src={previewUrl} alt="" />
           ) : (
-            <span>该图层暂无位图内容</span>
+            <span>{t('该图层暂无位图内容')}</span>
           )}
         </div>
         <div className="mb-3 flex gap-1.5">
@@ -293,7 +300,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
         </div>
         {format !== 'png' && (
           <div className="mb-3 flex items-center gap-2">
-            <span className="text-[11px] text-txt-3">质量</span>
+            <span className="text-[11px] text-txt-3">{t('质量')}</span>
             <Slider
               min={0.5}
               max={1}
@@ -309,7 +316,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
           style={{ width: '100%' }}
           onClick={() => onExport(format, scale, format === 'png' ? undefined : quality)}
         >
-          导出所选图层
+          {t('导出所选图层')}
         </button>
       </Section>
     </aside>

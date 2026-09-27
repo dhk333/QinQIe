@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useT } from '@/i18n/core'
 import ShortcutsPanel from './ShortcutsPanel'
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
 
 /** ? 呼出的快捷键弹窗壳：遮罩 + 标题 + 共享面板 */
 export default function ShortcutsOverlay({ onClose }: Props) {
+  const t = useT()
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       // 面板处于「等待新按键」捕获态时不关窗，交给面板处理
@@ -24,8 +26,8 @@ export default function ShortcutsOverlay({ onClose }: Props) {
     <div className="modal-mask" onMouseDown={onClose}>
       <div className="sc-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="sc-head">
-          <h3>快捷键</h3>
-          <span className="sc-sub">对齐 MasterGo 画布操作习惯 · 点击键帽可按新按键自定义</span>
+          <h3>{t('快捷键')}</h3>
+          <span className="sc-sub">{t('对齐 MasterGo 画布操作习惯 · 点击键帽可按新按键自定义')}</span>
         </div>
         <ShortcutsPanel />
       </div>

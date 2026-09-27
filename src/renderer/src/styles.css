@@ -452,6 +452,14 @@ body.dark .theme-toggle .icon-moon { display: none; }
   border-radius: 8px; color: var(--txt-2); font-size: 12.5px; cursor: pointer;
   transition: all 0.12s; position: relative; flex-shrink: 0;
 }
+.grp-search {
+  flex-shrink: 0; width: 100%; height: 30px; margin-bottom: 8px;
+  padding: 0 10px; border-radius: 8px; font-size: 12px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--txt);
+  outline: none; transition: border-color 0.15s;
+}
+.grp-search::placeholder { color: var(--txt-3); }
+.grp-search:focus { border-color: var(--accent); }
 .grp:hover { background: var(--panel-2); }
 .grp.on { background: var(--accent-dim); color: var(--txt); }
 .grp svg { width: 13px; height: 13px; color: var(--txt-3); flex-shrink: 0; }
@@ -1098,7 +1106,7 @@ body.dark .css-hl .ts { color: #82aaff; }
 .modal-mask.closing .modal { transform: scale(0.96); opacity: 0; }
 .modal {
   width: 380px; background: var(--panel); border: 1px solid var(--line-2);
-  border-radius: 16px; padding: 22px; box-shadow: 0 30px 70px rgba(0, 0, 0, 0.4);
+  border-radius: 16px; padding: 22px;
   animation: rise 0.2s var(--ease);
   transition: transform 0.12s ease, opacity 0.12s ease;
 }
