@@ -14,10 +14,13 @@ export interface RasterGradient {
   addColorStop(offset: number, color: string): void
 }
 
+/** 叶子位图来源：主线程解析产出的画布，或 Worker transfer 回来的 ImageBitmap */
+export type LeafSource = RasterCanvas | ImageBitmap
+
 export interface RasterCtx {
   save(): void
   restore(): void
-  drawImage(img: RasterCanvas, ...args: number[]): void
+  drawImage(img: LeafSource, ...args: number[]): void
   createImageData(w: number, h: number): RasterImageData
   getImageData(x: number, y: number, w: number, h: number): RasterImageData
   putImageData(data: RasterImageData, x: number, y: number): void
@@ -56,7 +59,7 @@ export interface MaskInfo {
   bottom: number
   defaultColor: number
   disabled: boolean
-  canvas?: RasterCanvas | null
+  canvas?: LeafSource | null
 }
 
 export interface ShadowInfo {
@@ -138,7 +141,7 @@ export interface RNode {
   clipping: boolean
   blendMode: string
   /** 图层原始位图（未烘焙蒙版、未叠加样式） */
-  canvas?: RasterCanvas | null
+  canvas?: LeafSource | null
   mask?: MaskInfo | null
   /** 形状图层：PS 存的内嵌位图已按矢量蒙版裁切，重复裁切只会引入边缘误差 */
   shapeLayer?: boolean
@@ -383,7 +386,8 @@ function planeToCanvas(env: Env, plane: Float64Array, w: number, h: number): Ras
 
 // ---------------------------------------------------------------- 蒙版
 
-function applyMask(env: Env, src: RasterCanvas, mask: MaskInfo, layerLeft: number, layerTop: number): RasterCanvas {
+/** 蒙版就地作用于 src；无蒙版时原样返回，否则落到新画布（恒为 RasterCanvas） */
+function applyMask<T extends LeafSource>(env: Env, src: T, mask: MaskInfo, layerLeft: number, layerTop: number): T | RasterCanvas {
   if (mask.disabled || !mask.canvas) return src
   const mL = mask.left
   const mT = mask.top
@@ -558,7 +562,7 @@ function hasEffects(e?: EffectInfo | null): boolean {
 }
 
 /** 内容位图 + 图层样式 → 最终位图；(cx,cy) 为内容左上角的文档坐标，rect 为目标区域（含外扩） */
-function bake(env: Env, content: RasterCanvas, cx: number, cy: number, rect: Rect, e: EffectInfo | null | undefined, fill: number): RasterCanvas {
+function bake(env: Env, content: LeafSource, cx: number, cy: number, rect: Rect, e: EffectInfo | null | undefined, fill: number): RasterCanvas {
   const c = env.createCanvas(rect.w, rect.h)
   const ctx = c.getContext('2d')
   const ox = cx - rect.x
@@ -679,7 +683,7 @@ function paintLeaf(t: PaintTarget, n: RNode, rc: RenderCtx): void {
 }
 
 /** 剪贴裁切用的 alpha：基底的内容区域（不含投影，含描边） */
-function clipAlpha(n: RNode, rc: RenderCtx, within?: Rect | null): { canvas: RasterCanvas; x: number; y: number } | null {
+function clipAlpha(n: RNode, rc: RenderCtx, within?: Rect | null): { canvas: LeafSource; x: number; y: number } | null {
   if (n.kind === 'group') {
     const r = renderGroup(n, rc, within ?? null)
     if (!r) return null
@@ -690,7 +694,7 @@ function clipAlpha(n: RNode, rc: RenderCtx, within?: Rect | null): { canvas: Ras
     const bmp = leafBitmap(n, rc.env)
     if (bmp) return { canvas: bmp.canvas, x: bmp.rect.x, y: bmp.rect.y }
   }
-  let content: RasterCanvas = n.canvas
+  let content: LeafSource = n.canvas
   if (n.mask) content = applyMask(rc.env, content, n.mask, n.left, n.top)
   if (n.fillOpacity < 1) {
     const f = rc.env.createCanvas(content.width, content.height)
@@ -1003,7 +1007,7 @@ export function buildRNode(layer: AgLikeLayer, idFor: (l: AgLikeLayer) => number
     hidden: !!layer.hidden,
     clipping: !!layer.clipping,
     blendMode: layer.blendMode ?? 'normal',
-    canvas: (layer.canvas as RasterCanvas | undefined) ?? null,
+    canvas: (layer.canvas as LeafSource | undefined) ?? null,
     mask: layer.mask
       ? {
           left: layer.mask.left ?? 0,
@@ -1012,7 +1016,7 @@ export function buildRNode(layer: AgLikeLayer, idFor: (l: AgLikeLayer) => number
           bottom: layer.mask.bottom ?? 0,
           defaultColor: layer.mask.defaultColor ?? 0,
           disabled: !!layer.mask.disabled,
-          canvas: (layer.mask.canvas as RasterCanvas | undefined) ?? null
+          canvas: (layer.mask.canvas as LeafSource | undefined) ?? null
         }
       : null,
     shapeLayer: !!layer.vectorFill,

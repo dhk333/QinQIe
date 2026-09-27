@@ -3,11 +3,14 @@ import type { DocSlice, ExportFormat, Project, ProjectPsd } from '@/types'
 import {
   parsePsd,
   parsePsdFallback,
-  decodeLayerCanvases,
+  fetchPsdFile,
+  materializeBitmaps,
   flattenLayers,
   buildCompositeCanvas,
-  renderLayerCanvas
+  renderLayerCanvas,
+  type LayerBitmap
 } from '@/lib/psd'
+import { decodeLayersInWorker, WorkerDecodeError } from '@/lib/psdWorker'
 import { exportCanvasBytes } from '@/lib/export'
 import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
 import { matchCommand, effectiveDisplay, COMMAND_MAP } from '@shared/keymap'
@@ -85,9 +88,14 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   /** 解码完成前画布用的 PSD 内嵌合成图占位 */
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null)
   const [rnodes, setRnodes] = useState<RNode[]>([])
-  const canvasMapRef = useRef<Map<number, HTMLCanvasElement>>(new Map())
-  /** 待执行的第二遍全量解码任务（入场动画点亮后消费） */
-  const decodeJobRef = useRef<{ buffer: Uint8Array; name: string; tree: PsdLayer[] } | null>(null)
+  const canvasMapRef = useRef<Map<number, LayerBitmap>>(new Map())
+  /** 待执行的第二遍全量解码任务（入场动画点亮后交给 Worker 执行） */
+  const decodeJobRef = useRef<{
+    buffer: Uint8Array
+    name: string
+    tree: PsdLayer[]
+    path: string
+  } | null>(null)
   const [hiddenIds, setHiddenIds] = useState<Set<number>>(new Set())
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -306,8 +314,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     setLoadTarget(5)
     perfReset()
     perfBegin('read')
-    window.api
-      .readPsdByPath(psd.path)
+    fetchPsdFile(psd.path)
       .then(async ({ name, buffer }) => {
         if (!alive) return
         perfEnd('read')
@@ -347,11 +354,11 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         setLoadTarget(60)
         setLoading(false)
         // 结构阶段跳过了全部位图（canvasMap 为空）时登记第二遍全量解码任务：
-        // 等入场动画点亮后再跑，transform/opacity 动画在合成器线程不受主线程阻塞影响
+        // 等入场动画点亮后再交给 Worker，解码整段离开主线程
         if (parsed.canvasMap.size === 0) {
           setDecoding(true)
           setLoadTarget(88)
-          decodeJobRef.current = { buffer, name, tree: parsed.tree }
+          decodeJobRef.current = { buffer, name, tree: parsed.tree, path: psd.path }
         }
       })
       .catch(() => {
@@ -366,7 +373,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [psd.path])
 
-  // 入场动画点亮后执行登记的全量解码：合成器线程上的动画不会被解码阻塞卡顿。
+  // 入场动画点亮后把登记的全量解码交给 Worker：主线程全程不阻塞。
   // entered 依赖 rAF，窗口不可见时 rAF 停摆，故带 2.5s 定时器兜底，避免解码永挂
   const startDecode = useCallback(() => {
     const job = decodeJobRef.current
@@ -375,18 +382,25 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     setTimeout(async () => {
       try {
         perfBegin('decode')
-        const decoded = decodeLayerCanvases(job.buffer, job.tree)
+        const decoded = await decodeLayersInWorker(job.buffer, job.tree)
+        // ImageBitmap 只是跨线程载体，浏览器会很快丢弃其解码缓存 → 立刻固化成 DOM canvas
+        materializeBitmaps(decoded.rnodes, decoded.canvasMap)
         perfEnd('decode')
         canvasMapRef.current = decoded.canvasMap
         setRnodes(decoded.rnodes)
         setPreviewCanvas(null)
         setLoadTarget(100)
         setDecoding(false)
-      } catch {
+      } catch (e) {
         // ag-psd 能读结构但位图/蒙版数据解不动（如 Invalid mask size），
-        // 整文档交给备用解析器重建树+位图，节点 id 变了需重置选中态
+        // 整文档交给备用解析器重建树+位图，节点 id 变了需重置选中态。
+        // buffer 已转移进 Worker：解码失败会随错误回传；Worker 整体崩溃拿不回，按原路径重读
         try {
-          const fb = await parsePsdFallback(job.buffer, job.name)
+          const returned = e instanceof WorkerDecodeError ? e.returnedBuffer : undefined
+          const buf = returned
+            ? new Uint8Array(returned)
+            : (await fetchPsdFile(job.path)).buffer
+          const fb = await parsePsdFallback(buf, job.name)
           canvasMapRef.current = fb.canvasMap
           setRnodes(fb.rnodes)
           setDoc(fb.doc)

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { ExportFormat, PsdDoc, PsdLayer } from '@/types'
 import { blendLabel, layerCssSnippet, layerEffectNames, sampleColor } from '@/lib/export'
 import { loadExportPrefs } from '@/lib/exportPrefs'
-import { indexRNodes, renderLayerCanvas } from '@/lib/psd'
+import { indexRNodes, renderLayerCanvas, type LayerBitmap } from '@/lib/psd'
 import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
 import { CheckIcon, CopyIcon } from './icons'
@@ -12,7 +12,7 @@ interface Props {
   layer: PsdLayer | null
   doc: PsdDoc | null
   rnodes: RNode[]
-  canvasMap: Map<number, HTMLCanvasElement>
+  canvasMap: Map<number, LayerBitmap>
   hiddenIds: Set<number>
   onExport: (format: ExportFormat, scale: number, quality?: number) => void
 }

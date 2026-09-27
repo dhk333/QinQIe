@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
-import { buildCompositeCanvas, flattenLayers } from '@/lib/psd'
+import { buildCompositeCanvas, flattenLayers, readLayerPixels, type LayerBitmap } from '@/lib/psd'
 import { perfCompositeBegin, perfCompositeSpan } from '@/lib/perf'
 import { useT } from '@/i18n/core'
 
@@ -19,7 +19,7 @@ interface Props {
   doc: PsdDoc | null
   tree: PsdLayer[]
   rnodes: RNode[]
-  canvasMap: Map<number, HTMLCanvasElement>
+  canvasMap: Map<number, LayerBitmap>
   hiddenIds: Set<number>
   /** 逐层位图解码完成前的内嵌合成图占位；解码完成或用户改显隐后即失效让位给真实合成 */
   preview?: HTMLCanvasElement | null
@@ -558,8 +558,6 @@ export default function CanvasView({
     for (const layer of rectHits) {
       const c = canvasMap.get(layer.id)
       if (!c) continue
-      const cctx = c.getContext('2d')
-      if (!cctx) continue
       const px = dx - layer.left
       const py = dy - layer.top
       const sx = c.width / Math.max(1, layer.width)
@@ -573,7 +571,8 @@ export default function CanvasView({
         const w = Math.min(c.width - x0, rad * 2 + 1)
         const h = Math.min(c.height - y0, rad * 2 + 1)
         if (w <= 0 || h <= 0) continue
-        const d = cctx.getImageData(x0, y0, w, h).data
+        const d = readLayerPixels(c, x0, y0, w, h)?.data
+        if (!d) continue
         for (let i = 3; i < d.length; i += 4) {
           if (d[i] > 0) return layer
         }

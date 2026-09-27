@@ -8,11 +8,9 @@ const api = {
   // 项目数据持久化
   loadProjects: (): Promise<{ projects: unknown[] }> => ipcRenderer.invoke('projects:load'),
   saveProjects: (data: unknown): Promise<boolean> => ipcRenderer.invoke('projects:save', data),
-  // PSD 文件
+  // PSD 文件（字节由渲染层走 psdfile:// 协议直取，不再过 IPC）
   pickPsdPaths: (): Promise<string[]> => ipcRenderer.invoke('psd:pick'),
   importPsds: (paths: string[]) => ipcRenderer.invoke('psd:import', paths),
-  readPsdByPath: (path: string): Promise<{ name: string; buffer: Uint8Array }> =>
-    ipcRenderer.invoke('psd:read', path),
   fileExists: (p: string): Promise<boolean> => ipcRenderer.invoke('file:exists', p),
   readDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke('file:read-dataurl', p),
   pathsForFiles: (files: File[]): string[] =>

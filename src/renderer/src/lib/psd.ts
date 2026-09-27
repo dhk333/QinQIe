@@ -1,19 +1,29 @@
 import { readPsd, type Layer, type Psd } from 'ag-psd'
 import type { PsdDoc, PsdLayer } from '@/types'
 import { perfBake, perfCanvasCreated, perfLeafPaint } from './perf'
-import {
-  buildRNode,
-  compositeDocument,
-  renderIsolated,
-  type Env,
-  type RNode
-} from './compositor'
+import { compositeDocument, renderIsolated, type Env, type RNode } from './compositor'
+import { toRNodes, type LayerBitmap } from './psdDecode'
+
+export type { LayerBitmap } from './psdDecode'
+export { decodeLayerCanvases } from './psdDecode'
+
+// PSD 字节读取：走主进程注册的 psdfile:// 流式协议直取，
+// 替代旧的 ipcRenderer.invoke('psd:read')（240MB 结构化克隆双拷贝 ≈2.3s）。
+// 固定 host 段 f + 路径分段编码：standard scheme 会把首段当 host，盘符编码后解析失败
+export async function fetchPsdFile(path: string): Promise<{ name: string; buffer: Uint8Array }> {
+  const segs = path.split(/[\\/]+/).filter(Boolean).map(encodeURIComponent).join('/')
+  const res = await fetch(`psdfile://f/${segs}`)
+  if (!res.ok) throw new Error(`psdfile ${res.status}`)
+  const buffer = new Uint8Array(await res.arrayBuffer())
+  const name = path.split(/[\\/]/).pop() ?? path
+  return { name, buffer }
+}
 
 export interface ParseResult {
   doc: PsdDoc
   tree: PsdLayer[]
   /** 图层原始位图（未烘焙蒙版/样式），供取色与命中测试使用 */
-  canvasMap: Map<number, HTMLCanvasElement>
+  canvasMap: Map<number, LayerBitmap>
   /** 与 tree 同 id 的合成器节点树，预览与导出都以它为准 */
   rnodes: RNode[]
   /** PSD 内嵌合成图：两阶段加载中解码完成前画布的即时预览源 */
@@ -93,7 +103,7 @@ function groupBounds(children: PsdLayer[]): { left: number; top: number; width: 
   return { left: l, top: t, width: r - l, height: b - t }
 }
 
-function toNode(layer: Layer, canvasMap: Map<number, HTMLCanvasElement>, ids: WeakMap<Layer, number>): PsdLayer {
+function toNode(layer: Layer, canvasMap: Map<number, LayerBitmap>, ids: WeakMap<Layer, number>): PsdLayer {
   const id = nextId++
   ids.set(layer, id)
   if (layer.canvas) canvasMap.set(id, layer.canvas)
@@ -120,12 +130,7 @@ function toNode(layer: Layer, canvasMap: Map<number, HTMLCanvasElement>, ids: We
   }
 }
 
-/** 用 PsdLayer 树的 id 反推合成器节点树，保证选中/显隐状态两边通用 */
-function toRNodes(layers: Layer[], ids: WeakMap<Layer, number>): RNode[] {
-  return layers.map((l) =>
-    buildRNode(l as unknown as Parameters<typeof buildRNode>[0], (x) => ids.get(x as Layer) ?? 0)
-  )
-}
+// toRNodes / decodeLayerCanvases 在 psdDecode.ts（Worker 侧共用）
 
 export function indexRNodes(nodes: RNode[], out = new Map<number, RNode>()): Map<number, RNode> {
   for (const n of nodes) {
@@ -135,6 +140,69 @@ export function indexRNodes(nodes: RNode[], out = new Map<number, RNode>()): Map
   return out
 }
 
+// 图层位图像素读取：DOM canvas 直读；Worker 回传的 ImageBitmap 借一块复用小画布中转。
+// 仅主线程命中测试/取色用，区域都很小，中转成本可忽略
+let readScratch: HTMLCanvasElement | null = null
+export function readLayerPixels(
+  img: LayerBitmap,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): ImageData | null {
+  if (img instanceof HTMLCanvasElement) {
+    try {
+      return img.getContext('2d')?.getImageData(x, y, w, h) ?? null
+    } catch {
+      return null
+    }
+  }
+  if (!readScratch) {
+    readScratch = document.createElement('canvas')
+    readScratch.getContext('2d', { willReadFrequently: true })
+  }
+  readScratch.width = w
+  readScratch.height = h
+  const ctx = readScratch.getContext('2d')
+  if (!ctx) return null
+  ctx.clearRect(0, 0, w, h)
+  ctx.drawImage(img, x, y, w, h, 0, 0, w, h)
+  return ctx.getImageData(0, 0, w, h)
+}
+
+/**
+ * Worker 回传的 ImageBitmap 只能当临时载体：实测其解码缓存会在数秒内被丢弃，
+ * 位图变成全透明但 width/height 不变。收到后立刻逐张拷成 DOM canvas 作为长期
+ * 像素存储（同一实例只拷一次，保持 rnode 与 canvasMap 的引用一致），再 close 释放。
+ */
+export function materializeBitmaps(
+  rnodes: RNode[],
+  canvasMap: Map<number, LayerBitmap>
+): void {
+  const copies = new Map<ImageBitmap, HTMLCanvasElement>()
+  const copy = (b: ImageBitmap): HTMLCanvasElement => {
+    let c = copies.get(b)
+    if (!c) {
+      c = document.createElement('canvas')
+      c.width = b.width
+      c.height = b.height
+      c.getContext('2d')?.drawImage(b, 0, 0)
+      copies.set(b, c)
+    }
+    return c
+  }
+  const walk = (ns: RNode[]): void => {
+    for (const n of ns) {
+      if (n.canvas instanceof ImageBitmap) n.canvas = copy(n.canvas)
+      if (n.mask?.canvas instanceof ImageBitmap) n.mask.canvas = copy(n.mask.canvas)
+      if (n.children) walk(n.children)
+    }
+  }
+  walk(rnodes)
+  for (const [id, b] of canvasMap) if (b instanceof ImageBitmap) canvasMap.set(id, copy(b))
+  for (const b of copies.keys()) b.close()
+}
+
 export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = false): ParseResult {
   const psd: Psd = readPsd(buffer, {
     skipLinkedFilesData: true,
@@ -142,7 +210,7 @@ export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = f
     // 结构阶段跳过逐层位图（大头），但保留内嵌合成图（~76ms）供解码完成前即时预览
     ...(structureOnly ? { skipLayerImageData: true } : {})
   })
-  const canvasMap = new Map<number, HTMLCanvasElement>()
+  const canvasMap = new Map<number, LayerBitmap>()
   const ids = new WeakMap<Layer, number>()
   const layers = psd.children ?? []
   let tree: PsdLayer[] = layers.map((l) => toNode(l, canvasMap, ids))
@@ -193,61 +261,7 @@ export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = f
   }
 }
 
-// 两阶段加载的第二步：全量解码位图，按 parsePsd(structureOnly) 生成的树位置对齐，
-// 把 canvas 填进以既有节点 id 为键的 canvasMap，并用同一批 id 重建合成器节点树
-export function decodeLayerCanvases(
-  buffer: Uint8Array,
-  tree: PsdLayer[]
-): { canvasMap: Map<number, HTMLCanvasElement>; rnodes: RNode[] } {
-  const psd: Psd = readPsd(buffer, { skipLinkedFilesData: true, skipThumbnail: true })
-  const canvasMap = new Map<number, HTMLCanvasElement>()
-  const ids = new WeakMap<Layer, number>()
-  const attach = (layers: Layer[], nodes: PsdLayer[]) => {
-    // 两遍解析结果必须严格同构：任何数量/类型/边界不一致都视为 id 错位，
-    // 立即抛错让上层回落到备用解析器，宁可慢也不给图层贴错名字和位图。
-    // 组判定与 toNode 对齐：layer.children 数组存在（哪怕为空）即为组。
-    if (layers.length !== nodes.length) {
-      throw new Error(`两阶段解析节点数不一致: ${layers.length} vs ${nodes.length}`)
-    }
-    for (let i = 0; i < layers.length; i++) {
-      const layer = layers[i]
-      const node = nodes[i]
-      ids.set(layer, node.id)
-      if (node.type === 'group') {
-        const subs = layer.children ?? []
-        if (subs.length !== (node.children?.length ?? 0)) {
-          throw new Error(`两阶段解析子节点数错位: #${node.id} ${node.name}`)
-        }
-        if (subs.length) attach(subs, node.children!)
-        continue
-      }
-      if (layer.children?.length) {
-        throw new Error(`两阶段解析图层类型错位: #${node.id} ${node.name}`)
-      }
-      const l = layer.left ?? 0
-      const t = layer.top ?? 0
-      const w = (layer.right ?? l) - l
-      const h = (layer.bottom ?? t) - t
-      if (
-        Math.abs(l - node.left) > 1 ||
-        Math.abs(t - node.top) > 1 ||
-        Math.abs(w - node.width) > 1 ||
-        Math.abs(h - node.height) > 1
-      ) {
-        throw new Error(
-          `两阶段解析边界错位: #${node.id} ${node.name} [${l},${t},${w},${h}] vs [${node.left},${node.top},${node.width},${node.height}]`
-        )
-      }
-      if (layer.canvas) canvasMap.set(node.id, layer.canvas)
-    }
-  }
-  const layers = psd.children ?? []
-  attach(layers, tree)
-  return { canvasMap, rnodes: toRNodes(layers, ids) }
-}
-
-export function flattenLayers(nodes: PsdLayer[], out: PsdLayer[] = []): PsdLayer[] {
-  for (const n of nodes) {
+export function flattenLayers(nodes: PsdLayer[], out: PsdLayer[] = []): PsdLayer[] {  for (const n of nodes) {
     out.push(n)
     if (n.children) flattenLayers(n.children, out)
   }
@@ -305,7 +319,7 @@ export async function parsePsdFallback(buffer: Uint8Array, fileName: string): Pr
     buffer.byteOffset + buffer.byteLength
   ) as ArrayBuffer
   const psd = Psd.parse(ab)
-  const canvasMap = new Map<number, HTMLCanvasElement>()
+  const canvasMap = new Map<number, LayerBitmap>()
 
   // webtoon 的 children 是自上而下（顶层在前），与 ag-psd 相反；
   // 逆序遍历，统一成自底向上，保证绘制顺序与剪贴链语义一致
