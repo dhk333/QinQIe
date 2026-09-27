@@ -15,6 +15,7 @@ import ChangelogPage from '@/pages/ChangelogPage'
 import SettingsPage from '@/pages/SettingsPage'
 import ShortcutsOverlay from '@/components/ShortcutsOverlay'
 import OnboardingTour from '@/components/OnboardingTour'
+import CloseAskModal from '@/components/CloseAskModal'
 import AppLogo from '@/components/AppLogo'
 import { useT } from '@/i18n/core'
 import { BackIcon, CaretDownIcon, GearIcon, PlusIcon, UploadIcon } from '@/components/icons'
@@ -359,6 +360,7 @@ export default function App() {
       )}
 
       <OnboardingTour projects={projects ?? []} />
+      <CloseAskModal />
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
     </div>
   )

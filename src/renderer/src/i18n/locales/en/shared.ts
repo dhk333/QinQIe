@@ -15,6 +15,15 @@ export default {
   '最小化': 'Minimize',
   '最大化 / 还原': 'Maximize / Restore',
   '关闭': 'Close',
+  // 关窗确认（CloseAskModal.tsx）
+  '关闭轻切？': 'Close 轻切?',
+  '最小化到托盘后，正在进行的导出与解析会继续；退出应用会中断它们。':
+    'Minimizing to the tray keeps ongoing exports and parsing running; quitting the app interrupts them.',
+  '不再询问': 'Don’t ask again',
+  '退出应用': 'Quit app',
+  '最小化到托盘': 'Minimize to tray',
+  '关闭时重新询问': 'Ask again on close',
+  '已恢复，下次关闭会重新询问': 'Restored — you’ll be asked again next time you close',
   '加载中…': 'Loading…',
   '项目不存在': 'Project not found',
   // HomePage.tsx

@@ -5,6 +5,16 @@ const api = {
   winMinimize: (): void => ipcRenderer.send('win:minimize'),
   winMaximize: (): void => ipcRenderer.send('win:maximize'),
   winClose: (): void => ipcRenderer.send('win:close'),
+  winCloseChoice: (action: 'quit' | 'tray', remember: boolean): void =>
+    ipcRenderer.send('win:close-choice', action, remember),
+  getClosePref: (): Promise<'quit' | 'tray' | null> => ipcRenderer.invoke('app:close-pref'),
+  resetClosePref: (): void => ipcRenderer.send('app:reset-close-pref'),
+  // 主进程拦截关闭后回问渲染层：弹确认还是按已记住的选择直接执行
+  onAskClose: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('win:ask-close', listener)
+    return () => ipcRenderer.removeListener('win:ask-close', listener)
+  },
   // 项目数据持久化
   loadProjects: (): Promise<{ projects: unknown[] }> => ipcRenderer.invoke('projects:load'),
   saveProjects: (data: unknown): Promise<boolean> => ipcRenderer.invoke('projects:save', data),

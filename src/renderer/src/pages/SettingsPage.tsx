@@ -180,8 +180,13 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
   const [prefs, setPrefs] = useState<ExportPrefs>(() => loadExportPrefs())
   const [stats, setStats] = useState<{ root: string; total: number; thumbs: number } | null>(null)
   const [checking, setChecking] = useState(false)
+  const [closePref, setClosePref] = useState<'quit' | 'tray' | null>(null)
   const dialog = useDialog()
   const toast = useToast()
+
+  useEffect(() => {
+    void window.api.getClosePref().then(setClosePref)
+  }, [])
 
   const shown = pending ?? active
 
@@ -714,6 +719,18 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 {checking ? t('检查中…') : t('检查更新')}
               </button>
               <button className="btn btn-secondary" onClick={startOnboarding}>{t('重放新手引导')}</button>
+              {closePref && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    window.api.resetClosePref()
+                    setClosePref(null)
+                    toast(t('已恢复，下次关闭会重新询问'))
+                  }}
+                >
+                  {t('关闭时重新询问')}
+                </button>
+              )}
             </div>
             <p className="m-0 mt-[14px] max-w-[660px] select-text text-[11.5px] leading-[1.9] text-txt-3">
               {t('数据与缓存管理见「设置 → 通用 → 存储与缓存」；全部处理发生在本机，不联网、不上传。')}
