@@ -4,8 +4,8 @@ import { useT } from '@/i18n/core'
 export default function ChangelogPage() {
   const t = useT()
   return (
-    <main className="changelog-main">
-      <div className="cl-list">
+    <main id="page-changelog" className="flex-1 overflow-auto p-[18px_36px_48px]">
+      <div className="flex flex-col">
         {RELEASES.map((r, i) => (
           <section key={r.version} className="cl-item">
             <aside className="cl-side">

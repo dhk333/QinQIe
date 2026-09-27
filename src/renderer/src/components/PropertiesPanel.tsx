@@ -121,7 +121,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
 
   if (!layer) {
     return (
-      <aside className="flex w-full min-h-0 flex-1 flex-col bg-panel">
+      <aside id="properties-panel" className="flex w-full min-h-0 flex-1 flex-col bg-panel">
         <div className="flex h-10 shrink-0 items-center border-b border-border px-4 text-[12.5px] font-semibold text-txt">
           {t('属性')}
         </div>
@@ -142,7 +142,7 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
     layer.type === 'group' ? t('图层组') : layer.isText ? t('文本图层') : t('像素图层')
 
   return (
-    <aside className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto bg-panel">
+    <aside id="properties-panel" className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto bg-panel">
       <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center border-b border-border bg-panel px-4 text-[12.5px] font-semibold text-txt">
         {t('属性')}
       </div>

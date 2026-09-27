@@ -16,10 +16,10 @@ export default function PsdThumb({ thumbPath, kind }: { thumbPath?: string; kind
     }
   }, [thumbPath])
 
-  if (src) return <img src={src} alt="" />
+  if (src) return <img data-c="psd-thumb" src={src} alt="" />
   if (kind === 'thumb') return null
   return (
-    <div className="cover-fallback">
+    <div data-c="psd-thumb" className="cover-fallback">
       <i className="h" />
       <i className="hero" />
       <i />

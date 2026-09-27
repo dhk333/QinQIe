@@ -60,6 +60,7 @@ export default function Slider({ min, max, step, value, disabled, onChange }: Sl
   return (
     <div
       ref={trackRef}
+      data-c="slider"
       className={`ui-slider${disabled ? ' ui-slider-dis' : ''}`}
       role="slider"
       tabIndex={disabled ? -1 : 0}

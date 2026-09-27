@@ -46,7 +46,7 @@ export default function ShortcutsPanel() {
   const customCount = Object.keys(getOverrides()).length
 
   return (
-    <div className="sc-panel">
+    <div id="shortcuts-panel" className="flex min-h-0 flex-1 flex-col">
       <div className="sc-body">
         {GROUPS.map((g) => {
           const cmds = KEY_COMMANDS.filter((c) => c.group === g && c.chords.length)
@@ -60,7 +60,7 @@ export default function ShortcutsPanel() {
                 return (
                   <div key={c.id} className="sc-row">
                     <span>{t(c.label)}</span>
-                    <span className="sc-acts">
+                    <span className="flex shrink-0 items-center gap-[5px]">
                       {custom && !capturing && (
                         <button
                           className="sc-reset"
@@ -94,7 +94,7 @@ export default function ShortcutsPanel() {
         ))}
       </div>
       <div className="sc-foot">
-        {flash ? <span className="sc-warn">{flash}</span> : <span />}
+        {flash ? <span className="text-[11.5px] text-[#d97706]">{flash}</span> : <span />}
         <button className="btn btn-secondary" disabled={!customCount} onClick={resetAllOverrides}>
           {t('全部恢复默认')}
         </button>

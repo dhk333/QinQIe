@@ -257,7 +257,7 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
   const grpClass = (g: string) => `grp${selectedGroup === g ? ' on' : ''}${dragOverGrp === g ? ' dragover' : ''}`
 
   return (
-    <div className={`proj-body${grpCollapsed ? ' grp-collapsed' : ''}`}>
+    <div id="page-project" className={`proj-body${grpCollapsed ? ' grp-collapsed' : ''}`}>
       <aside className={`group-panel${grpCollapsed ? ' collapsed' : ''}`}>
         <input
           className="grp-search"
@@ -295,7 +295,7 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
           {FolderSvg}
           {t('未分组')}<span className="cnt">{cnt('ungrouped')}</span>
         </span>
-        <span className="grp-add" onClick={() => void handleAddGroup()}>＋ {t('新建分组')}</span>
+        <span className="mt-[4px] flex h-[32px] shrink-0 cursor-pointer items-center gap-[8px] rounded-[8px] px-[9px] text-[12px] text-txt-3 hover:bg-panel-2 hover:text-txt-2" onClick={() => void handleAddGroup()}>＋ {t('新建分组')}</span>
       </aside>
       <span
         className="gp-chev"

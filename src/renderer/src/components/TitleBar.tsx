@@ -11,7 +11,7 @@ interface Props {
 export default function TitleBar({ fileName, canExport, onOpen, onExport }: Props) {
   const t = useT()
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-bg px-4">
+    <header id="title-bar" className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-bg px-4">
       <div className="flex items-center gap-3">
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-violet-600 to-violet-400 text-[12px] font-bold text-white">
           切
