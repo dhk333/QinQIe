@@ -1,4 +1,10 @@
 export default {
+  // dev 性能小条（PerfChip）
+  '读取': 'Read',
+  '结构解析': 'Structure',
+  '位图解码': 'Decode',
+  '备用解析': 'Fallback',
+  '合成': 'Composite',
   // 加载与解析 toast
   '加载 PSD 失败': 'Failed to load PSD',
   '主解析器不支持该文件，已使用备用解析器': 'This file is not supported by the main parser; the fallback parser was used',

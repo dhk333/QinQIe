@@ -13,6 +13,7 @@ import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
 import { matchCommand, effectiveDisplay, COMMAND_MAP } from '@shared/keymap'
 import { useDialog, useToast } from '@/lib/ui'
 import { useT } from '@/i18n/core'
+import { perfBegin, perfEnd, perfReset, perfReport, perfEnabled, type PerfPhase } from '@/lib/perf'
 import LayerTree, { type LayerTreeApi } from '@/components/LayerTree'
 import CanvasView, { type CanvasTool, type CanvasViewApi } from '@/components/CanvasView'
 import ContextMenu from '@/components/ContextMenu'
@@ -46,6 +47,30 @@ function findInTree(nodes: PsdLayer[], id: number): PsdLayer | null {
     if (hit) return hit
   }
   return null
+}
+
+/** dev 专用：解析各阶段耗时 + 合成统计，左下角常驻小条 */
+function PerfChip() {
+  const t = useT()
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!perfEnabled) return
+    const id = window.setInterval(() => tick((n) => n + 1), 800)
+    return () => window.clearInterval(id)
+  }, [])
+  const rep = perfReport()
+  if (!rep) return null
+  const label: Record<PerfPhase, string> = {
+    read: t('读取'),
+    structure: t('结构解析'),
+    decode: t('位图解码'),
+    fallback: t('备用解析')
+  }
+  const parts = rep.phases.map((p) => `${label[p.phase]} ${p.ms}ms`)
+  if (rep.composite.count > 0) {
+    parts.push(`${t('合成')} ${rep.composite.last}ms×${rep.composite.count}`)
+  }
+  return <div className="perf-chip">{parts.join(' · ')}</div>
 }
 
 export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props) {
@@ -270,20 +295,30 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     let alive = true
     setLoading(true)
     setLoadTarget(5)
+    perfReset()
+    perfBegin('read')
     window.api
       .readPsdByPath(psd.path)
       .then(async ({ name, buffer }) => {
         if (!alive) return
+        perfEnd('read')
         setLoadTarget(30)
         let parsed
+        let usedFallback = false
+        perfBegin('structure')
         try {
           // 两阶段加载：先只做结构解析（~50ms）让图层树/面板立即可用
           parsed = parsePsd(buffer, name, true)
         } catch {
           // 主解析器失败时使用 @webtoon/psd 兜底（支持 ZIP 压缩等），其位图已逐层渲染
+          perfEnd('structure')
+          usedFallback = true
+          perfBegin('fallback')
           parsed = await parsePsdFallback(buffer, name)
+          perfEnd('fallback')
           toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
         }
+        if (!usedFallback) perfEnd('structure')
         canvasMapRef.current = parsed.canvasMap
         setRnodes(parsed.rnodes)
         setDoc(parsed.doc)
@@ -308,7 +343,9 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           setTimeout(async () => {
             if (!alive) return
             try {
+              perfBegin('decode')
               const decoded = decodeLayerCanvases(buffer, parsed.tree)
+              perfEnd('decode')
               canvasMapRef.current = decoded.canvasMap
               setRnodes(decoded.rnodes)
               setLoadTarget(100)
@@ -925,6 +962,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           {loaderInner}
         </div>
       )}
+      {perfEnabled && <PerfChip />}
       <aside ref={leftRef} className={`panel panel-left${leftCollapsed ? ' collapsed' : ''}`}>
         <div className="panel-head">
           <span className="label">{t('图 层')}</span>
