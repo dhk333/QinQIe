@@ -5,12 +5,14 @@ import { useDialog, useToast } from '@/lib/ui'
 import { useHashRoute, navigate } from '@/lib/router'
 import { applyTheme, loadTheme } from '@/lib/themes'
 import { applyFontSize, loadFontSize, type FontSizeId } from '@/lib/uiFont'
+import { onboardingSeen, startOnboarding } from '@/lib/onboarding'
 import HomePage from '@/pages/HomePage'
 import ProjectPage from '@/pages/ProjectPage'
 import DetailPage from '@/pages/DetailPage'
 import ChangelogPage from '@/pages/ChangelogPage'
 import SettingsPage from '@/pages/SettingsPage'
 import ShortcutsOverlay from '@/components/ShortcutsOverlay'
+import OnboardingTour from '@/components/OnboardingTour'
 import AppLogo from '@/components/AppLogo'
 import { useT } from '@/i18n/core'
 import { BackIcon, CaretDownIcon, GearIcon, PlusIcon, UploadIcon } from '@/components/icons'
@@ -60,6 +62,10 @@ export default function App() {
   useEffect(() => {
     loadProjectsData().then(setProjects)
   }, [])
+
+  useEffect(() => {
+    if (projects && !onboardingSeen()) startOnboarding()
+  }, [projects])
 
   const persist = useCallback((mutate: (list: Project[]) => void) => {
     setProjects((prev) => {
@@ -231,7 +237,7 @@ export default function App() {
                 placeholder={t('搜索项目…')}
               />
             </div>
-            <button className="btn btn-primary" onClick={handleCreateProject}>
+            <button id="btn-new-project" className="btn btn-primary" onClick={handleCreateProject}>
               <PlusIcon />
               {t('新建项目')}
             </button>
@@ -239,7 +245,7 @@ export default function App() {
         )}
 
         {route.name === 'project' && currentProject && (
-          <button className="btn btn-primary" onClick={handleUpload}>
+          <button id="btn-upload-psd" className="btn btn-primary" onClick={handleUpload}>
             <UploadIcon />
             {t('上传 PSD')}
           </button>
@@ -329,6 +335,7 @@ export default function App() {
         </div>
       )}
 
+      <OnboardingTour projects={projects ?? []} />
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
     </div>
   )

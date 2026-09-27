@@ -5,6 +5,7 @@ import Slider from '@/components/Slider'
 import ChangelogPage from '@/pages/ChangelogPage'
 import { useDialog, useToast } from '@/lib/ui'
 import { loadExportPrefs, saveExportPrefs, type ExportPrefs } from '@/lib/exportPrefs'
+import { startOnboarding } from '@/lib/onboarding'
 import {
   CUSTOM_ID,
   THEMES,
@@ -77,7 +78,7 @@ const NAV: {
   },
   {
     group: '关于',
-    items: [{ id: 'about', label: '关于轻切', Icon: InfoIcon, keywords: '介绍 项目 版本' }]
+    items: [{ id: 'about', label: '关于轻切', Icon: InfoIcon, keywords: '介绍 项目 版本 新手引导 教程 重放' }]
   }
 ]
 
@@ -542,10 +543,13 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 </ul>
               </section>
             </div>
-            <div className="m-0 mt-4 flex gap-[10px]">
+            <div className="m-0 mt-4 flex items-center gap-[10px]">
               <button className="btn btn-secondary" disabled={checking} onClick={() => void checkNow()}>
                 <DownloadIcon className="h-3.5 w-3.5" />
                 {checking ? t('检查中…') : t('检查更新')}
+              </button>
+              <button className="btn btn-secondary" onClick={startOnboarding}>
+                {t('重放新手引导')}
               </button>
             </div>
             <p className="m-0 mt-[14px] max-w-[660px] select-text text-[11.5px] leading-[1.9] text-txt-3">
