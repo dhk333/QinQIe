@@ -12,9 +12,11 @@ import ChangelogPage from '@/pages/ChangelogPage'
 import SettingsPage from '@/pages/SettingsPage'
 import ShortcutsOverlay from '@/components/ShortcutsOverlay'
 import AppLogo from '@/components/AppLogo'
+import { useT } from '@/i18n/core'
 import { BackIcon, CaretDownIcon, GearIcon, PlusIcon, UploadIcon } from '@/components/icons'
 
 export default function App() {
+  const t = useT()
   const hash = useHashRoute()
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [theme, setTheme] = useState<string>(loadTheme)
@@ -31,8 +33,10 @@ export default function App() {
   useEffect(() => {
     let alive = true
     window.api.checkUpdate().then((u) => {
-      if (!u || !alive) return
-      if (localStorage.getItem('qq:update-dismissed') !== u.version) setUpdate(u)
+      if (!alive) return
+      if (u && u.status === 'new') {
+        if (localStorage.getItem('qq:update-dismissed') !== u.version) setUpdate(u)
+      }
     })
     return () => {
       alive = false
@@ -101,15 +105,15 @@ export default function App() {
   const handleCreateProject = async () => {
     const name = await dialog({
       type: 'prompt',
-      title: '新建项目',
-      desc: '项目用于归类同一批设计稿，PSD 文件只记录路径、不会被移动',
-      placeholder: '项目名称，例如：沃尔核材官网',
-      okText: '创建'
+      title: t('新建项目'),
+      desc: t('项目用于归类同一批设计稿，PSD 文件只记录路径、不会被移动'),
+      placeholder: t('项目名称，例如：沃尔核材官网'),
+      okText: t('创建')
     })
     if (!name || typeof name !== 'string') return
     const p = createProject(name)
     persist((list) => list.unshift(p))
-    toast(`已创建项目「${name}」`)
+    toast(t('已创建项目「{name}」', { name }))
     navigate(`#/project/${p.id}`)
   }
 
@@ -127,7 +131,7 @@ export default function App() {
           {route.name !== 'home' && (
             <span
               className="back-btn"
-              title="返回"
+              title={t('返回')}
               onClick={() => {
                 if (route.name === 'changelog') navigate('#/settings')
                 else if (route.name === 'settings') navigate(settingsFrom)
@@ -145,13 +149,13 @@ export default function App() {
           {update && (
             <span
               className="upd-pill"
-              title="点击查看 Release 并下载新版本"
+              title={t('点击查看 Release 并下载新版本')}
               onClick={() => window.open(update.url)}
             >
-              新版 v{update.version}
+              {t('新版 v{version}', { version: update.version })}
               <button
                 className="upd-x"
-                title="本次不再提醒"
+                title={t('本次不再提醒')}
                 onClick={(e) => {
                   e.stopPropagation()
                   localStorage.setItem('qq:update-dismissed', update.version)
@@ -224,12 +228,12 @@ export default function App() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索项目…"
+                placeholder={t('搜索项目…')}
               />
             </div>
             <button className="btn btn-primary" onClick={handleCreateProject}>
               <PlusIcon />
-              新建项目
+              {t('新建项目')}
             </button>
           </>
         )}
@@ -237,13 +241,13 @@ export default function App() {
         {route.name === 'project' && currentProject && (
           <button className="btn btn-primary" onClick={handleUpload}>
             <UploadIcon />
-            上传 PSD
+            {t('上传 PSD')}
           </button>
         )}
 
         <button
           className="theme-toggle"
-          title="设置"
+          title={t('设置')}
           onClick={() => {
             setSettingsFrom(hash === '#/settings' ? '#/home' : hash)
             navigate('#/settings')
@@ -253,13 +257,13 @@ export default function App() {
         </button>
 
         <div className="win-controls">
-          <span className="win-btn" title="最小化" onClick={() => window.api.winMinimize()}>
+          <span className="win-btn" title={t('最小化')} onClick={() => window.api.winMinimize()}>
             <svg viewBox="0 0 10 10" fill="none" stroke="currentColor"><path d="M0 5h10" /></svg>
           </span>
-          <span className="win-btn" title="最大化 / 还原" onClick={() => window.api.winMaximize()}>
+          <span className="win-btn" title={t('最大化 / 还原')} onClick={() => window.api.winMaximize()}>
             <svg viewBox="0 0 10 10" fill="none" stroke="currentColor"><rect x="0.5" y="0.5" width="9" height="9" /></svg>
           </span>
-          <span className="win-btn close" title="关闭" onClick={() => window.api.winClose()}>
+          <span className="win-btn close" title={t('关闭')} onClick={() => window.api.winClose()}>
             <svg viewBox="0 0 10 10" fill="none" stroke="currentColor"><path d="M0 0l10 10M10 0L0 10" /></svg>
           </span>
         </div>
@@ -267,7 +271,7 @@ export default function App() {
 
       {loading ? (
         <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--txt-3)', fontSize: 13 }}>
-          加载中…
+          {t('加载中…')}
         </div>
       ) : (
         <div className="page page-enter" key={hash} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -320,7 +324,7 @@ export default function App() {
             />
           )}
           {route.name === 'project' && !currentProject && (
-            <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--txt-3)' }}>项目不存在</div>
+            <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--txt-3)' }}>{t('项目不存在')}</div>
           )}
         </div>
       )}

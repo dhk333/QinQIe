@@ -2,6 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'r
 import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
 import { buildCompositeCanvas, flattenLayers } from '@/lib/psd'
+import { useT } from '@/i18n/core'
 
 export type CanvasTool = 'move' | 'slice' | 'picker' | 'hand'
 
@@ -151,6 +152,7 @@ export default function CanvasView({
   onUpdateSlice,
   onDeleteSlice
 }: Props) {
+  const t = useT()
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
@@ -395,6 +397,16 @@ export default function CanvasView({
           const bYe = by0 >= ay1 ? by0 : by1
           measure(X(lineX), Y(aYe), X(lineX), Y(bYe), gy, false)
         }
+        // 包含关系（如选中组、悬停组内子层）：两轴 gap 均为 null，
+        // 按 Figma 语义显示子层到组包围盒四边的内边距
+        if (gx === null && gy === null && bx0 >= ax0 && bx1 <= ax1 && by0 >= ay0 && by1 <= ay1) {
+          const cyL = (by0 + by1) / 2
+          const cxV = (bx0 + bx1) / 2
+          if (bx0 > ax0) measure(X(ax0), Y(cyL), X(bx0), Y(cyL), bx0 - ax0, true)
+          if (bx1 < ax1) measure(X(bx1), Y(cyL), X(ax1), Y(cyL), ax1 - bx1, true)
+          if (by0 > ay0) measure(X(cxV), Y(ay0), X(cxV), Y(by0), by0 - ay0, false)
+          if (by1 < ay1) measure(X(cxV), Y(by1), X(cxV), Y(ay1), ay1 - by1, false)
+        }
       }
     }
 
@@ -532,7 +544,8 @@ export default function CanvasView({
     // 优先命中不透明像素（容差随缩放变化，约 2 个屏幕像素）
     const r = Math.max(0, Math.ceil(2 / zoom))
     for (const layer of rectHits) {
-      const c = canvasMap.get(layer.id)!
+      const c = canvasMap.get(layer.id)
+      if (!c) continue
       const cctx = c.getContext('2d')
       if (!cctx) continue
       const px = dx - layer.left
@@ -760,8 +773,8 @@ export default function CanvasView({
             <span className="text-2xl font-bold text-accent-2">切</span>
           </div>
           <div>
-            <p className="text-[15px] font-medium text-txt">打开一个 PSD 文件开始切图</p>
-            <p className="mt-1 text-[12px] text-txt-3">在项目页上传 PSD 后点击画板进入</p>
+            <p className="text-[15px] font-medium text-txt">{t('打开一个 PSD 文件开始切图')}</p>
+            <p className="mt-1 text-[12px] text-txt-3">{t('在项目页上传 PSD 后点击画板进入')}</p>
           </div>
         </div>
       </div>

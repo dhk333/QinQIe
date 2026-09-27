@@ -1,5 +1,6 @@
 import type { ExportFormat, PsdLayer } from '@/types'
 import type { RNode } from './compositor'
+import { t } from '@/i18n/core'
 
 function canvasToBlob(canvas: HTMLCanvasElement, format: ExportFormat, quality?: number): Promise<Blob | null> {
   return new Promise((resolve) => {
@@ -100,7 +101,8 @@ const BLEND_LABELS: Record<string, string> = {
 }
 
 export function blendLabel(mode: string): string {
-  return BLEND_LABELS[mode] ?? mode
+  const label = BLEND_LABELS[mode]
+  return label ? t(label) : mode
 }
 
 function fxColor(c: { r: number; g: number; b: number }, opacity: number): string {
@@ -126,7 +128,7 @@ export function layerEffectNames(rnode?: RNode): string[] {
   if (on(e.stroke)) names.push('描边')
   if (on(e.solidFill)) names.push('颜色叠加')
   if (on(e.gradientOverlay)) names.push('渐变叠加')
-  return names
+  return names.map((n) => t(n))
 }
 
 export function layerCssSnippet(layer: PsdLayer, color: string | null, rnode?: RNode): string {

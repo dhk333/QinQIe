@@ -15,10 +15,12 @@ import {
 } from '@/lib/themes'
 import { RELEASES } from '@/lib/changelog'
 import { FONT_SIZES, type FontSizeId } from '@/lib/uiFont'
+import { useT, getLang, setLang, LANGS } from '@/i18n/core'
 import {
   DownloadIcon,
   FontIcon,
   FolderIcon,
+  GlobeIcon,
   HistoryIcon,
   InfoIcon,
   KeyboardIcon,
@@ -35,6 +37,7 @@ interface Props {
 
 type SectionId =
   | 'themes'
+  | 'language'
   | 'storage'
   | 'export'
   | 'fontsize'
@@ -55,6 +58,7 @@ const NAV: {
     group: '通用',
     items: [
       { id: 'themes', label: '主题', Icon: PaletteIcon, keywords: '亮色 暗色 明暗 配色 自定义 晴空 墨夜 青瓷 暖沙 绛紫 松墨' },
+      { id: 'language', label: '语言', Icon: GlobeIcon, keywords: 'Language 语言 简体 繁体 English 繁體' },
       { id: 'storage', label: '存储与缓存', Icon: FolderIcon, keywords: '数据目录 容量 缩略图 清理 隐私 离线' },
       { id: 'export', label: '导出设置', Icon: DownloadIcon, keywords: '格式 倍数 质量 png jpg webp 默认' }
     ]
@@ -116,6 +120,8 @@ function ThemePreview({ bg, panel, accent }: { bg: string; panel: string; accent
 }
 
 export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSizeChange }: Props) {
+  const t = useT()
+  const lang = getLang()
   const [active, setActive] = useState<SectionId>('themes')
   const [pending, setPending] = useState<SectionId | null>(null)
   const swapTimer = useRef<number>(0)
@@ -124,6 +130,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
   const [draft, setDraft] = useState<CustomTheme | null>(null)
   const [prefs, setPrefs] = useState<ExportPrefs>(() => loadExportPrefs())
   const [stats, setStats] = useState<{ root: string; total: number; thumbs: number } | null>(null)
+  const [checking, setChecking] = useState(false)
   const dialog = useDialog()
   const toast = useToast()
 
@@ -143,14 +150,14 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
   const clearThumbs = async () => {
     const ok = await dialog({
       type: 'confirm',
-      title: '清理缩略图缓存',
-      desc: '删除后已导入画板的缩略图显示为占位图，重新导入 PSD 会再次生成。不影响 PSD 源文件与项目记录。',
-      okText: '清理'
+      title: t('清理缩略图缓存'),
+      desc: t('删除后已导入画板的缩略图显示为占位图，重新导入 PSD 会再次生成。不影响 PSD 源文件与项目记录。'),
+      okText: t('清理')
     })
     if (!ok) return
     const freed = await window.api.clearThumbCache()
     setStats(await window.api.dataStats())
-    toast(`已释放 ${fmtBytes(freed)}`)
+    toast(t('已释放 {size}', { size: fmtBytes(freed) }))
   }
 
   const switchTo = (id: SectionId) => {
@@ -170,19 +177,23 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
       .map((g) => ({
         ...g,
         items: g.items.filter(
-          (i) => i.label.toLowerCase().includes(q) || (i.keywords ?? '').toLowerCase().includes(q)
+          (i) =>
+            t(i.label).toLowerCase().includes(q) ||
+            i.label.toLowerCase().includes(q) ||
+            (i.keywords ?? '').toLowerCase().includes(q)
         )
       }))
       .filter((g) => g.items.length)
-  }, [query])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, lang])
 
   const draftValid = !!draft && COLOR_FIELDS.every((f) => isHex(draft[f.key]))
 
   const saveDraft = () => {
     if (!draft || !draftValid) return
-    const t: CustomTheme = { ...draft, name: draft.name.trim() || '我的主题' }
-    saveCustomTheme(t)
-    setCustom(t)
+    const ct: CustomTheme = { ...draft, name: draft.name.trim() || t('我的主题') }
+    saveCustomTheme(ct)
+    setCustom(ct)
     setDraft(null)
     onThemeChange(CUSTOM_ID)
   }
@@ -194,6 +205,29 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
     if (theme === CUSTOM_ID) onThemeChange('light')
   }
 
+  const checkNow = async () => {
+    if (checking) return
+    setChecking(true)
+    try {
+      const r = await window.api.checkUpdate()
+      if (r.status === 'new') {
+        const go = await dialog({
+          type: 'confirm',
+          title: t('发现新版本 v{version}', { version: r.version }),
+          desc: r.notes || t('前往 GitHub 下载页获取最新版本。'),
+          okText: t('去下载')
+        })
+        if (go) window.open(r.url)
+      } else if (r.status === 'latest') {
+        toast(t('已是最新版本 v{version}', { version: RELEASES[0]?.version?.replace(/^v/i, '') ?? 'dev' }))
+      } else {
+        toast(t('检查更新失败，请检查网络后重试'), 'error')
+      }
+    } finally {
+      setChecking(false)
+    }
+  }
+
   return (
     <div className="set-wrap">
       <aside className="set-nav">
@@ -202,13 +236,13 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索设置…"
+            placeholder={t('搜索设置…')}
           />
         </div>
         <div className="set-nav-scroll">
           {groups.map((g) => (
             <section key={g.group}>
-              <h5>{g.group}</h5>
+              <h5>{t(g.group)}</h5>
               {g.items.map((i) => (
                 <div
                   key={i.id}
@@ -217,7 +251,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 >
                   <i.Icon className="h-3.5 w-3.5" />
                   <span className="si-col">
-                    {i.label}
+                    {t(i.label)}
                     {query.trim() && i.keywords && (
                       <small className="si-kw">{i.keywords}</small>
                     )}
@@ -226,31 +260,31 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               ))}
             </section>
           ))}
-          {!groups.length && <p className="set-empty">没有匹配的设置</p>}
+          {!groups.length && <p className="set-empty">{t('没有匹配的设置')}</p>}
         </div>
       </aside>
       <main className="set-main">
         <div key={active} className={`set-pane${pending ? ' out' : ''}`}>
         {active === 'themes' && (
           <div className="set-sec set-sec-wide">
-            <h4>主题</h4>
-            <p className="set-desc">全局配色方案（含明暗），点击即切换，重启后保持</p>
+            <h4>{t('主题')}</h4>
+            <p className="set-desc">{t('全局配色方案（含明暗），点击即切换，重启后保持')}</p>
             <div className="theme-grid">
-              {THEMES.map((t) => (
+              {THEMES.map((th) => (
                 <div
-                  key={t.id}
-                  className={`theme-card${theme === t.id ? ' on' : ''}`}
+                  key={th.id}
+                  className={`theme-card${theme === th.id ? ' on' : ''}`}
                   onClick={() => {
                     setDraft(null)
-                    onThemeChange(t.id)
+                    onThemeChange(th.id)
                   }}
                 >
-                  <ThemePreview bg={t.preview[0]} panel={t.preview[1]} accent={t.preview[2]} />
+                  <ThemePreview bg={th.preview[0]} panel={th.preview[1]} accent={th.preview[2]} />
                   <div className="th-meta">
-                    <span className="th-name">{t.name}</span>
-                    <span className="th-desc">{t.desc}</span>
+                    <span className="th-name">{t(th.name)}</span>
+                    <span className="th-desc">{t(th.desc)}</span>
                   </div>
-                  {theme === t.id && <span className="th-check">✓</span>}
+                  {theme === th.id && <span className="th-check">✓</span>}
                 </div>
               ))}
               {custom ? (
@@ -261,7 +295,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                   <ThemePreview bg={custom.bg} panel={custom.panel} accent={custom.accent} />
                   <div className="th-meta">
                     <span className="th-name">{custom.name}</span>
-                    <span className="th-desc">自定义 · {custom.base === 'dark' ? '暗色' : '亮色'}</span>
+                    <span className="th-desc">{t('自定义')} · {custom.base === 'dark' ? t('暗色') : t('亮色')}</span>
                   </div>
                   {theme === CUSTOM_ID && <span className="th-check">✓</span>}
                   <button
@@ -271,12 +305,12 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                       setDraft(custom)
                     }}
                   >
-                    编辑
+                    {t('编辑')}
                   </button>
                 </div>
               ) : (
                 <div className="theme-card th-dashed" onClick={() => setDraft({ ...NEW_THEME_DRAFT })}>
-                  <span>＋ 自定义主题</span>
+                  <span>{t('＋ 自定义主题')}</span>
                 </div>
               )}
             </div>
@@ -284,7 +318,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               <div className="ct-editor pop-in">
                 <div className="ct-row ct-row-top">
                   <label className="ct-name">
-                    <span>名称</span>
+                    <span>{t('名称')}</span>
                     <input
                       value={draft.name}
                       maxLength={12}
@@ -292,14 +326,14 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                     />
                   </label>
                   <div className="ct-base">
-                    <span>基准</span>
+                    <span>{t('基准')}</span>
                     {(['light', 'dark'] as const).map((b) => (
                       <button
                         key={b}
                         className={draft.base === b ? 'on' : ''}
                         onClick={() => setDraft({ ...draft, base: b })}
                       >
-                        {b === 'light' ? '亮色' : '暗色'}
+                        {b === 'light' ? t('亮色') : t('暗色')}
                       </button>
                     ))}
                   </div>
@@ -313,7 +347,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                         onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
                       />
                       <span className="ct-field">
-                        <b>{f.label}</b>
+                        <b>{t(f.label)}</b>
                         <input
                           value={draft[f.key]}
                           spellCheck={false}
@@ -325,18 +359,18 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 </div>
                 <div className="ct-preview">
                   <ThemePreview bg={draft.bg} panel={draft.panel} accent={draft.accent} />
-                  {!draftValid && <span className="ct-warn">色值需为 #rrggbb 十六进制格式</span>}
+                  {!draftValid && <span className="ct-warn">{t('色值需为 #rrggbb 十六进制格式')}</span>}
                 </div>
                 <div className="ct-foot">
                   <button className="btn btn-primary" disabled={!draftValid} onClick={saveDraft}>
-                    保存并应用
+                    {t('保存并应用')}
                   </button>
                   <button className="btn btn-ghost" onClick={() => setDraft(null)}>
-                    取消
+                    {t('取消')}
                   </button>
                   {custom && (
                     <button className="btn btn-ghost ct-del" onClick={removeCustom}>
-                      删除自定义
+                      {t('删除自定义')}
                     </button>
                   )}
                 </div>
@@ -346,36 +380,36 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
         )}
         {active === 'storage' && (
           <div className="set-sec">
-            <h4>存储与缓存</h4>
-            <p className="set-desc">所有数据只保存在本机用户目录，不联网、不上传</p>
+            <h4>{t('存储与缓存')}</h4>
+            <p className="set-desc">{t('所有数据只保存在本机用户目录，不联网、不上传')}</p>
             <dl className="ab-kv st-kv">
-              <dt>数据目录</dt>
-              <dd>{stats?.root ?? '读取中…'}</dd>
-              <dt>总占用</dt>
+              <dt>{t('数据目录')}</dt>
+              <dd>{stats?.root ?? t('读取中…')}</dd>
+              <dt>{t('总占用')}</dt>
               <dd>{stats ? fmtBytes(stats.total) : '—'}</dd>
-              <dt>缩略图缓存</dt>
-              <dd>{stats ? `${fmtBytes(stats.thumbs)}（重新导入 PSD 会再生成）` : '—'}</dd>
-              <dt>偏好设置</dt>
-              <dd>主题 / 字体 / 快捷键 / 导出默认，存于本机渲染层存储</dd>
+              <dt>{t('缩略图缓存')}</dt>
+              <dd>{stats ? t('{size}（重新导入 PSD 会再生成）', { size: fmtBytes(stats.thumbs) }) : '—'}</dd>
+              <dt>{t('偏好设置')}</dt>
+              <dd>{t('主题 / 字体 / 快捷键 / 导出默认，存于本机渲染层存储')}</dd>
             </dl>
             <div className="st-btns">
               <button className="btn btn-secondary" onClick={() => window.api.openDataDir()}>
                 <FolderIcon className="h-3.5 w-3.5" />
-                打开数据目录
+                {t('打开数据目录')}
               </button>
               <button className="btn btn-secondary" onClick={() => void clearThumbs()}>
                 <DownloadIcon className="h-3.5 w-3.5" />
-                清理缩略图缓存
+                {t('清理缩略图缓存')}
               </button>
             </div>
           </div>
         )}
         {active === 'export' && (
           <div className="set-sec">
-            <h4>导出设置</h4>
-            <p className="set-desc">详情页导出面板的默认值，修改后立即保存、重启后保持</p>
+            <h4>{t('导出设置')}</h4>
+            <p className="set-desc">{t('详情页导出面板的默认值，修改后立即保存、重启后保持')}</p>
             <div className="es-row">
-              <span className="es-label">默认格式</span>
+              <span className="es-label">{t('默认格式')}</span>
               <div className="es-seg">
                 {([['png', 'PNG'], ['jpeg', 'JPG'], ['webp', 'WebP']] as const).map(([f, label]) => (
                   <button key={f} className={prefs.format === f ? 'on' : ''} onClick={() => setPref({ format: f })}>
@@ -385,7 +419,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               </div>
             </div>
             <div className="es-row">
-              <span className="es-label">默认倍数</span>
+              <span className="es-label">{t('默认倍数')}</span>
               <div className="es-seg">
                 {[1, 2, 3].map((s) => (
                   <button
@@ -399,7 +433,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               </div>
             </div>
             <div className="es-row">
-              <span className="es-label">默认质量</span>
+              <span className="es-label">{t('默认质量')}</span>
               <div className="es-q">
                 <Slider
                   min={0.5}
@@ -412,13 +446,33 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 <b>{Math.round(prefs.quality * 100)}%</b>
               </div>
             </div>
-            {prefs.format === 'png' && <p className="set-desc es-note">PNG 为无损格式，质量设置仅在 JPG / WebP 时生效</p>}
+            {prefs.format === 'png' && <p className="set-desc es-note">{t('PNG 为无损格式，质量设置仅在 JPG / WebP 时生效')}</p>}
+          </div>
+        )}
+        {active === 'language' && (
+          <div className="set-sec">
+            <h4>{t('界面语言')}</h4>
+            <p className="set-desc">{t('切换后立即生效，重启后保持')}</p>
+            <div className="fs-list">
+              {LANGS.map((l) => (
+                <div
+                  key={l.id}
+                  className={`fs-row${lang === l.id ? ' on' : ''}`}
+                  onClick={() => setLang(l.id)}
+                >
+                  <span className="fs-meta" style={{ marginTop: 0 }}>
+                    <b>{l.label}</b>
+                  </span>
+                  {lang === l.id && <span className="fs-check">✓</span>}
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {active === 'fontsize' && (
           <div className="set-sec">
-            <h4>字体大小</h4>
-            <p className="set-desc">界面整体等比缩放，立即生效，重启后保持</p>
+            <h4>{t('字体大小')}</h4>
+            <p className="set-desc">{t('界面整体等比缩放，立即生效，重启后保持')}</p>
             <div className="fs-list">
               {FONT_SIZES.map((f) => (
                 <div
@@ -427,11 +481,11 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                   onClick={() => onFontSizeChange(f.id)}
                 >
                   <span className="fs-sample" style={{ fontSize: `${12.5 * f.zoom}px` }}>
-                    轻切 Aa
+                    {t('轻切 Aa')}
                   </span>
                   <span className="fs-meta">
-                    <b>{f.name}</b>
-                    <i>{f.desc}</i>
+                    <b>{t(f.name)}</b>
+                    <i>{t(f.desc)}</i>
                   </span>
                   {fontSize === f.id && <span className="fs-check">✓</span>}
                 </div>
@@ -447,39 +501,44 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               </div>
               <div>
                 <div className="ab-title-row">
-                  <h3>轻切</h3>
+                  <h3>{t('轻切')}</h3>
                   <span className="ab-ver">v{RELEASES[0]?.version?.replace(/^v/i, '') ?? 'dev'}</span>
                 </div>
-                <p className="ab-tag">本地 PSD 切图工具 · 完全离线</p>
+                <p className="ab-tag">{t('本地 PSD 切图工具 · 完全离线')}</p>
               </div>
             </header>
             <p className="ab-desc">
-              直接读取 Photoshop 设计稿，图层树浏览、画布预览与导出与 PS 逐像素对齐；
-              按图层 / 切片批量导出多格式多倍图。设计稿只记录路径、不会被移动或上传，全部处理发生在本机。
+              {t('直接读取 Photoshop 设计稿，图层树浏览、画布预览与导出与 PS 逐像素对齐；按图层 / 切片批量导出多格式多倍图。设计稿只记录路径、不会被移动或上传，全部处理发生在本机。')}
             </p>
             <div className="ab-cards">
               <section className="ab-card">
-                <h5>核心能力</h5>
+                <h5>{t('核心能力')}</h5>
                 <ul>
-                  <li>项目 / PSD 两级管理，缩略图缓存秒开列表</li>
-                  <li>自研合成器：显隐、蒙版、图层样式与 Photoshop 对齐</li>
-                  <li>PNG · JPEG · WebP 与 @1x/@2x/@3x 批量导出</li>
-                  <li>MasterGo 式画布：空格抓手、Ctrl+滚轮缩放、S 切片</li>
-                  <li>快捷键自由改绑，切片命名 / 持久化 / 撤销</li>
+                  <li>{t('项目 / PSD 两级管理，缩略图缓存秒开列表')}</li>
+                  <li>{t('自研合成器：显隐、蒙版、图层样式与 Photoshop 对齐')}</li>
+                  <li>{t('PNG · JPEG · WebP 与 @1x/@2x/@3x 批量导出')}</li>
+                  <li>{t('MasterGo 式画布：空格抓手、Ctrl+滚轮缩放、S 切片')}</li>
+                  <li>{t('快捷键自由改绑，切片命名 / 持久化 / 撤销')}</li>
                 </ul>
               </section>
             </div>
+            <div className="st-btns">
+              <button className="btn btn-secondary" disabled={checking} onClick={() => void checkNow()}>
+                <DownloadIcon className="h-3.5 w-3.5" />
+                {checking ? t('检查中…') : t('检查更新')}
+              </button>
+            </div>
             <p className="ab-desc ab-foot">
-              数据与缓存管理见「设置 → 通用 → 存储与缓存」；全部处理发生在本机，不联网、不上传。
+              {t('数据与缓存管理见「设置 → 通用 → 存储与缓存」；全部处理发生在本机，不联网、不上传。')}
             </p>
           </div>
         )}
         {active === 'changelog' && <ChangelogPage />}
         {active === 'shortcuts' && (
           <div className="set-sec set-sec-wide">
-            <h4>快捷键设置</h4>
+            <h4>{t('快捷键设置')}</h4>
             <p className="set-desc">
-              点击键帽后按下新组合即可改绑，自动提示冲突；单条 ↺ 恢复，或全部恢复默认。自定义仅保存在本机。
+              {t('点击键帽后按下新组合即可改绑，自动提示冲突；单条 ↺ 恢复，或全部恢复默认。自定义仅保存在本机。')}
             </p>
             <ShortcutsPanel />
           </div>

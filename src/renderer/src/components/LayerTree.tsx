@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { PsdLayer } from '@/types'
+import { useT } from '@/i18n/core'
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -159,6 +160,7 @@ const LayerTree = forwardRef<LayerTreeApi, Props>(function LayerTree(
   },
   ref
 ) {
+  const t = useT()
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   const listRef = useRef<HTMLDivElement>(null)
@@ -237,7 +239,7 @@ const LayerTree = forwardRef<LayerTreeApi, Props>(function LayerTree(
             ref={searchRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索图层…"
+            placeholder={t('搜索图层…')}
             className="w-full bg-transparent text-[12px] text-txt outline-none placeholder:text-txt-3"
           />
         </div>
@@ -245,7 +247,7 @@ const LayerTree = forwardRef<LayerTreeApi, Props>(function LayerTree(
       <div ref={listRef} className="flex-1 overflow-y-auto p-1.5">
         {filtered.length === 0 ? (
           <p className="px-2 py-4 text-center text-[12px] text-txt-3">
-            {tree.length === 0 ? '尚未打开 PSD 文件' : '没有匹配的图层'}
+            {tree.length === 0 ? t('尚未打开 PSD 文件') : t('没有匹配的图层')}
           </p>
         ) : (
           filtered.map((layer) => (

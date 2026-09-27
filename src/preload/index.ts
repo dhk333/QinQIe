@@ -29,8 +29,11 @@ const api = {
     ipcRenderer.invoke('app:data-stats'),
   clearThumbCache: (): Promise<number> => ipcRenderer.invoke('app:clear-thumb-cache'),
   // 更新检查
-  checkUpdate: (): Promise<{ version: string; url: string; notes: string } | null> =>
-    ipcRenderer.invoke('app:check-update'),
+  checkUpdate: (): Promise<
+    | { status: 'new'; version: string; url: string; notes: string }
+    | { status: 'latest' }
+    | { status: 'error' }
+  > => ipcRenderer.invoke('app:check-update'),
   // 原生菜单点击 → 渲染层命令分发（与快捷键同源）
   onMenuExec: (cb: (id: string) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, id: string): void => cb(id)

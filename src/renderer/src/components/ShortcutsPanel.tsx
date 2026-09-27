@@ -8,11 +8,13 @@ import {
   getOverride
 } from '@shared/keymap'
 import { clearOverride, getOverrides, resetAllOverrides, setOverride, subscribeKeymap } from '@/lib/keymapSettings'
+import { useT } from '@/i18n/core'
 
 const GROUPS: KeyCommand['group'][] = ['工具', '视图', '选择', '编辑', '图层', '导出', '界面']
 
 /** 快捷键列表 + 点击键帽自定义，设置页与 ? 弹窗共用 */
 export default function ShortcutsPanel() {
+  const t = useT()
   const [captureId, setCaptureId] = useState<string | null>(null)
   const [flash, setFlash] = useState('')
   const [, bump] = useReducer((n: number) => n + 1, 0)
@@ -35,7 +37,7 @@ export default function ShortcutsPanel() {
       const conflict = findChordConflict(captureId, chord)
       setOverride(captureId, [chord])
       setCaptureId(null)
-      setFlash(conflict ? `已绑定，但与「${conflict.label}」键位相同，可去设置该命令解决` : '')
+      setFlash(conflict ? t('已绑定，但与「{label}」键位相同，可去设置该命令解决', { label: conflict.label }) : '')
     }
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
@@ -51,18 +53,18 @@ export default function ShortcutsPanel() {
           if (!cmds.length) return null
           return (
             <section key={g} className="sc-group">
-              <h4>{g}</h4>
+              <h4>{t(g)}</h4>
               {cmds.map((c) => {
                 const custom = !!getOverride(c.id)
                 const capturing = captureId === c.id
                 return (
                   <div key={c.id} className="sc-row">
-                    <span>{c.label}</span>
+                    <span>{t(c.label)}</span>
                     <span className="sc-acts">
                       {custom && !capturing && (
                         <button
                           className="sc-reset"
-                          title="恢复默认键位"
+                          title={t('恢复默认键位')}
                           onClick={() => clearOverride(c.id)}
                         >
                           ↺
@@ -75,7 +77,7 @@ export default function ShortcutsPanel() {
                           setCaptureId(capturing ? null : c.id)
                         }}
                       >
-                        {capturing ? '按下新按键…' : effectiveDisplay(c)}
+                        {capturing ? t('按下新按键…') : effectiveDisplay(c)}
                       </button>
                     </span>
                   </div>
@@ -86,7 +88,7 @@ export default function ShortcutsPanel() {
         })}
         {KEY_COMMANDS.filter((c) => !c.chords.length && c.group === '编辑').map((c) => (
           <div key={c.id} className="sc-row">
-            <span>{c.label}</span>
+            <span>{t(c.label)}</span>
             <kbd className="kbd">{c.display}</kbd>
           </div>
         ))}
@@ -94,7 +96,7 @@ export default function ShortcutsPanel() {
       <div className="sc-foot">
         {flash ? <span className="sc-warn">{flash}</span> : <span />}
         <button className="btn btn-secondary" disabled={!customCount} onClick={resetAllOverrides}>
-          全部恢复默认
+          {t('全部恢复默认')}
         </button>
       </div>
     </div>

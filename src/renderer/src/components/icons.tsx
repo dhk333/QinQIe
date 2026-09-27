@@ -283,3 +283,12 @@ export function GearIcon({ className }: IconProps) {
     </svg>
   )
 }
+
+export function GlobeIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9S14.6 18.4 12 21c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3Z" />
+    </svg>
+  )
+}

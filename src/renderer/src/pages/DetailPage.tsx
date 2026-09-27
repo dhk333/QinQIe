@@ -12,6 +12,7 @@ import { exportCanvasBytes } from '@/lib/export'
 import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
 import { matchCommand, effectiveDisplay, COMMAND_MAP } from '@shared/keymap'
 import { useDialog, useToast } from '@/lib/ui'
+import { useT } from '@/i18n/core'
 import LayerTree, { type LayerTreeApi } from '@/components/LayerTree'
 import CanvasView, { type CanvasTool, type CanvasViewApi } from '@/components/CanvasView'
 import ContextMenu from '@/components/ContextMenu'
@@ -48,6 +49,7 @@ function findInTree(nodes: PsdLayer[], id: number): PsdLayer | null {
 }
 
 export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props) {
+  const t = useT()
   const [doc, setDoc] = useState<PsdDoc | null>(null)
   const [tree, setTree] = useState<PsdLayer[]>([])
   const [decoding, setDecoding] = useState(false)
@@ -82,7 +84,10 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           const speed = gap > 30 ? 26 : gap > 10 ? 14 : 8
           return Math.min(loadTarget, p + speed * dt)
         }
-        return p >= 100 ? p : Math.min(99, p + 2 * dt)
+        // 终点档只许涨不许跌：旧实现在 (99.95,100) 区间会把 p 重置回 99，
+        // 造成每帧 99→100→99 的无限重渲染（CPU 满载死循环）
+        if (loadTarget >= 100) return Math.min(100, p)
+        return p >= 99 ? p : Math.min(99, p + 2 * dt)
       })
       raf = requestAnimationFrame(tick)
     }
@@ -277,7 +282,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         } catch {
           // 主解析器失败时使用 @webtoon/psd 兜底（支持 ZIP 压缩等），其位图已逐层渲染
           parsed = await parsePsdFallback(buffer, name)
-          toast('主解析器不支持该文件，已使用备用解析器', 'warning')
+          toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
         }
         canvasMapRef.current = parsed.canvasMap
         setRnodes(parsed.rnodes)
@@ -321,9 +326,9 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
                 setHiddenIds(new Set())
                 setSelectedId(null)
                 setSelectedIds(new Set())
-                toast('主解析器不支持该文件，已使用备用解析器', 'warning')
+                toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
               } catch {
-                toast('图层位图解码失败', 'error')
+                toast(t('图层位图解码失败'), 'error')
               }
               setLoadTarget(100)
               setDecoding(false)
@@ -333,7 +338,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       })
       .catch(() => {
         if (!alive) return
-        toast('加载 PSD 失败', 'error')
+        toast(t('加载 PSD 失败'), 'error')
         setLoading(false)
       })
     return () => {
@@ -393,8 +398,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   }
 
   const extOf = (f: ExportFormat) => (f === 'jpeg' ? 'jpg' : f)
-  const applyTemplate = (t: string, name: string, scale: number, format: ExportFormat, seq: number) =>
-    t
+  const applyTemplate = (tpl: string, name: string, scale: number, format: ExportFormat, seq: number) =>
+    tpl
       .replace('{名称}', name)
       .replace('{倍数}', String(scale))
       .replace('{格式}', extOf(format))
@@ -404,7 +409,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const writeAll = useCallback(
     async (items: { name: string; run: () => Promise<Uint8Array | null> }[]) => {
       if (!items.length) {
-        toast('没有可导出的内容', 'warning')
+        toast(t('没有可导出的内容'), 'warning')
         return
       }
       const dir = await window.api.pickDir()
@@ -435,7 +440,9 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       }
       setProgress(null)
       toast(
-        cancelRef.current ? `已取消，导出 ${saved} / ${items.length} 个文件` : `已导出 ${saved} 个文件到所选目录`
+        cancelRef.current
+          ? t('已取消，导出 {saved} / {total} 个文件', { saved, total: items.length })
+          : t('已导出 {saved} 个文件到所选目录', { saved })
       )
     },
     [toast]
@@ -446,17 +453,17 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       if (!selectedLayer || !doc) return
       const canvas = renderLayerCanvas(selectedLayer, rnodes, hiddenIds)
       if (!canvas) {
-        toast('该图层没有可导出的位图内容（文本或空图层）', 'warning')
+        toast(t('该图层没有可导出的位图内容（文本或空图层）'), 'warning')
         return
       }
       const safeName = selectedLayer.name.replace(/[\\/:*?"<>|]/g, '_')
       const bytes = await exportCanvasBytes(canvas, { scale, format, quality })
       if (!bytes) {
-        toast('该图层导出失败', 'error')
+        toast(t('该图层导出失败'), 'error')
         return
       }
       const saved = await window.api.saveImage(`${safeName}@${scale}x.${extOf(format)}`, format, bytes)
-      if (saved) toast(`已导出 ${safeName}@${scale}x.${extOf(format)}`)
+      if (saved) toast(t('已导出 {file}', { file: `${safeName}@${scale}x.${extOf(format)}` }))
     },
     [selectedLayer, doc, rnodes, hiddenIds, toast]
   )
@@ -535,15 +542,15 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   )
 
   const handleTemplate = async () => {
-    const t = await dialog({
+    const input = await dialog({
       type: 'prompt',
-      title: '命名模板',
-      desc: '可用变量：{名称} {倍数} {格式} {序号}',
+      title: t('命名模板'),
+      desc: t('可用变量：{名称} {倍数} {格式} {序号}'),
       value: template
     })
-    if (!t || typeof t !== 'string') return
-    setTemplate(t)
-    toast('命名模板已更新')
+    if (!input || typeof input !== 'string') return
+    setTemplate(input)
+    toast(t('命名模板已更新'))
   }
 
   // ========== 切片 ==========
@@ -603,7 +610,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     if (!news.length) return
     setSlices((prev) => [...prev, ...news])
     setSelectedSliceIds(new Set(news.map((s) => s.id)))
-    toast(`已从图层创建 ${news.length} 个切片`)
+    toast(t('已从图层创建 {n} 个切片', { n: news.length }))
   }
 
   // 隔离显示：只留下所选子树内的可见图层，「显示全部」恢复
@@ -619,7 +626,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       if (leaf.type === 'layer' && !keep.has(leaf.id)) next.add(leaf.id)
     }
     setHiddenIds(next)
-    toast(`已隔离显示 ${nodes.length} 个图层/组`)
+    toast(t('已隔离显示 {n} 个图层/组', { n: nodes.length }))
   }
 
   const menuItems = (() => {
@@ -630,16 +637,16 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     if (!nodes.length) return []
     return [
       {
-        label: `导出所选 ${nodes.length} 个图层…`,
+        label: t('导出所选 {n} 个图层…', { n: nodes.length }),
         hint: effectiveDisplay(COMMAND_MAP['export.batch']),
         onClick: () =>
           void exportNodes(nodes, batchFmt, [...batchScales], batchFmt === 'png' ? undefined : batchQuality)
       },
       {},
-      { label: '从图层创建切片', onClick: () => createSlicesFromNodes(nodes) },
+      { label: t('从图层创建切片'), onClick: () => createSlicesFromNodes(nodes) },
       {},
-      { label: '隔离显示', onClick: () => isolateNodes(nodes) },
-      { label: '显示全部图层', hint: effectiveDisplay(COMMAND_MAP['layer.hide']), onClick: () => setHiddenIds(new Set()) }
+      { label: t('隔离显示'), onClick: () => isolateNodes(nodes) },
+      { label: t('显示全部图层'), hint: effectiveDisplay(COMMAND_MAP['layer.hide']), onClick: () => setHiddenIds(new Set()) }
     ]
   })()
 
@@ -689,7 +696,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       if (!doc) return
       const targets = selectedSliceIds.size > 0 ? slices.filter((s) => selectedSliceIds.has(s.id)) : slices
       if (targets.length === 0) {
-        toast('还没有切片，用切片工具在画布上拖拽创建', 'warning')
+        toast(t('还没有切片，用切片工具在画布上拖拽创建'), 'warning')
         return
       }
       // 整篇合成只做一次，逐切片从大画布裁区域编码
@@ -723,7 +730,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const handlePickColor = useCallback(
     (hex: string) => {
       void navigator.clipboard.writeText(hex)
-      toast(`已取色 ${hex} 并复制到剪贴板`)
+      toast(t('已取色 {hex} 并复制到剪贴板', { hex }))
     },
     [toast]
   )
@@ -887,7 +894,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         <i style={{ width: `${loadPct}%` }} />
       </div>
       <span className="pl-text">
-        加载中，马上就好… <b>{Math.round(loadPct)}%</b>
+        {t('加载中，马上就好…')} <b>{Math.round(loadPct)}%</b>
       </span>
     </>
   )
@@ -920,7 +927,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       )}
       <aside ref={leftRef} className={`panel panel-left${leftCollapsed ? ' collapsed' : ''}`}>
         <div className="panel-head">
-          <span className="label">图 层</span>
+          <span className="label">{t('图 层')}</span>
           <span className="count">{layerCount}</span>
         </div>
         <LayerTree
@@ -976,8 +983,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           {tool === 'slice' ? (
             <>
               <span className="batch-label">
-                共 <b>{slices.length}</b> 个切片
-                {selectedSliceIds.size > 0 ? ` · 已选 ${selectedSliceIds.size} 个` : ''}
+                {t('共')} <b>{slices.length}</b> {t('个切片')}
+                {selectedSliceIds.size > 0 ? t(' · 已选 {n} 个', { n: selectedSliceIds.size }) : ''}
               </span>
               {selectedSlice && (
                 <span className="slice-editor">
@@ -985,8 +992,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
                     ref={sliceNameRef}
                     className="slice-name"
                     type="text"
-                    placeholder={`切片${selectedSlice.no}`}
-                    title="切片名，导出文件名用它"
+                    placeholder={t('切片{no}', { no: selectedSlice.no })}
+                    title={t('切片名，导出文件名用它')}
                     value={selectedSlice.name ?? ''}
                     maxLength={40}
                     onChange={(e) => updateSelectedSlice({ name: e.target.value })}
@@ -1003,33 +1010,33 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
                   ))}
                   <select
                     value={selectedSlice.format ?? ''}
-                    title="该切片的导出格式（默认跟随批量设置）"
+                    title={t('该切片的导出格式（默认跟随批量设置）')}
                     onChange={(e) =>
                       updateSelectedSlice({ format: (e.target.value || undefined) as ExportFormat | undefined })
                     }
                   >
-                    <option value="">格式·跟随</option>
+                    <option value="">{t('格式·跟随')}</option>
                     <option value="png">PNG</option>
                     <option value="jpeg">JPG</option>
                     <option value="webp">WebP</option>
                   </select>
                   <select
                     value={selectedSlice.scale ?? ''}
-                    title="该切片的导出倍数（默认跟随批量设置）"
+                    title={t('该切片的导出倍数（默认跟随批量设置）')}
                     onChange={(e) =>
                       updateSelectedSlice({ scale: e.target.value ? Number(e.target.value) : undefined })
                     }
                   >
-                    <option value="">倍数·跟随</option>
+                    <option value="">{t('倍数·跟随')}</option>
                     <option value="1">@1x</option>
                     <option value="2">@2x</option>
                     <option value="3">@3x</option>
                   </select>
-                  <button className="batch-mini" onClick={deleteSelectedSlices}>删除</button>
+                  <button className="batch-mini" onClick={deleteSelectedSlices}>{t('删除')}</button>
                 </span>
               )}
               <button className="batch-mini" onClick={() => void handleTemplate()}>
-                命名模板
+                {t('命名模板')}
               </button>
               <button
                 className={`batch-mini go${batchOpen ? ' active' : ''}`}
@@ -1038,16 +1045,16 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
                   setBatchOpen((v) => !v)
                 }}
               >
-                批量导出 ▾
+                {t('批量导出')} ▾
               </button>
             </>
           ) : (
             <>
               <span className="batch-label">
-                共 <b>{visibleLayerCount}</b> 个可见图层
+                {t('共')} <b>{visibleLayerCount}</b> {t('个可见图层')}
               </span>
               <button className="batch-mini" onClick={() => void handleTemplate()}>
-                命名模板
+                {t('命名模板')}
               </button>
               <button
                 className={`batch-mini go${batchOpen ? ' active' : ''}`}
@@ -1056,7 +1063,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
                   setBatchOpen((v) => !v)
                 }}
               >
-                批量导出 ▾
+                {t('批量导出')} ▾
               </button>
             </>
           )}
@@ -1064,7 +1071,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
 
         <div className={`export-pop${batchOpen ? ' open' : ''}`} onClick={(e) => e.stopPropagation()}>
           <div className="ep-group">
-            <span className="ep-label">格式</span>
+            <span className="ep-label">{t('格式')}</span>
             <div className="ep-opts">
               {(
                 [
@@ -1080,7 +1087,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             </div>
           </div>
           <div className="ep-group">
-            <span className="ep-label">倍数</span>
+            <span className="ep-label">{t('倍数')}</span>
             <div className="ep-opts">
               {[1, 2, 3].map((s) => (
                 <button
@@ -1103,7 +1110,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           </div>
           {batchFmt !== 'png' && (
             <div className="ep-group">
-              <span className="ep-label">质量</span>
+              <span className="ep-label">{t('质量')}</span>
               <Slider
                 min={0.5}
                 max={1}
@@ -1115,42 +1122,42 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             </div>
           )}
           <button className="btn btn-primary ep-go" onClick={runBatchExport}>
-            导出 {exportTargetCount * batchScales.size} 个文件
+            {t('导出 {n} 个文件', { n: exportTargetCount * batchScales.size })}
           </button>
         </div>
 
         <div className="zoombar">
           <span
             className={`zb${tool === 'move' ? ' active' : ''}`}
-            title="移动 / 选择图层 (V)"
+            title={t('移动 / 选择图层 (V)')}
             onClick={() => setTool('move')}
           >
             <MoveIcon />
           </span>
           <span
             className={`zb${tool === 'slice' ? ' active' : ''}`}
-            title="切片工具 (S) — 拖拽画切片"
+            title={t('切片工具 (S) — 拖拽画切片')}
             onClick={() => setTool('slice')}
           >
             <SliceIcon />
           </span>
           <span
             className={`zb${tool === 'picker' ? ' active' : ''}`}
-            title="取色器 (I) — 点击画布取色并复制"
+            title={t('取色器 (I) — 点击画布取色并复制')}
             onClick={() => setTool('picker')}
           >
             <PickerIcon />
           </span>
           <span
             className={`zb${tool === 'hand' ? ' active' : ''}`}
-            title="抓手 (H) — 拖拽平移"
+            title={t('抓手 (H) — 拖拽平移')}
             onClick={() => setTool('hand')}
           >
             <HandIcon />
           </span>
           <span
             className={`zb${showSlices ? ' active' : ''}`}
-            title="显示 / 隐藏切片"
+            title={t('显示 / 隐藏切片')}
             onClick={() => setShowSlices((v) => !v)}
           >
             <EyeIcon />
@@ -1158,7 +1165,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           <span className="sep" />
           <span
             className="zb"
-            title="缩小"
+            title={t('缩小')}
             onClick={() => canvasApiRef.current?.applyZoom(zoomPct / 100 / 1.2)}
           >
             <ZoomOutIcon />
@@ -1193,22 +1200,22 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           </span>
           <span
             className="zb"
-            title="放大"
+            title={t('放大')}
             onClick={() => canvasApiRef.current?.applyZoom((zoomPct / 100) * 1.2)}
           >
             <ZoomInIcon />
           </span>
           <span className="sep" />
-          <span className="zb" title="适应画布 (Shift+1)" onClick={() => canvasApiRef.current?.fit()}>
+          <span className="zb" title={t('适应画布 (Shift+1)')} onClick={() => canvasApiRef.current?.fit()}>
             <FitIcon />
           </span>
-          <span className="zb" title="缩放至 100% (Ctrl+0)" onClick={() => canvasApiRef.current?.applyZoom(1)}>
+          <span className="zb" title={t('缩放至 100% (Ctrl+0)')} onClick={() => canvasApiRef.current?.applyZoom(1)}>
             <span style={{ fontFamily: 'Consolas, monospace', fontSize: 9 }}>1:1</span>
           </span>
           <span className="sep" />
           <span
             className="zb"
-            title="快捷键一览 (?)"
+            title={t('快捷键一览 (?)')}
             onClick={() => window.dispatchEvent(new Event('qingqie:shortcuts'))}
           >
             <span style={{ fontFamily: 'Consolas, monospace', fontSize: 12, fontWeight: 600 }}>?</span>
@@ -1219,14 +1226,14 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           <div className="export-mask">
             <div className="export-progress">
               <p>
-                正在导出 <b>{progress.done}</b> / {progress.total}
+                {t('正在导出')} <b>{progress.done}</b> / {progress.total}
               </p>
               <div className="ep-bar">
                 <i style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }} />
               </div>
               <div className="row2">
                 <button className="btn btn-ghost" onClick={() => (cancelRef.current = true)}>
-                  取消
+                  {t('取消')}
                 </button>
               </div>
             </div>

@@ -1,5 +1,6 @@
 export interface ThemeDef {
   id: string
+  /** 显示名/描述为中文原文 i18n key，展示处需包 t()（词典见 locales 下 shared.ts），勿在此翻译 */
   name: string
   desc: string
   dark: boolean

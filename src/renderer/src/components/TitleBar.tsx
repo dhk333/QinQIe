@@ -1,3 +1,4 @@
+import { useT } from '@/i18n/core'
 import { OpenIcon, DownloadIcon } from './icons'
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export default function TitleBar({ fileName, canExport, onOpen, onExport }: Props) {
+  const t = useT()
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-bg px-4">
       <div className="flex items-center gap-3">
@@ -28,11 +30,11 @@ export default function TitleBar({ fileName, canExport, onOpen, onExport }: Prop
         )}
         <button className="btn-secondary" onClick={onOpen}>
           <OpenIcon className="h-4 w-4" />
-          打开 PSD
+          {t('打开 PSD')}
         </button>
         <button className="btn-primary" onClick={onExport} disabled={!canExport}>
           <DownloadIcon className="h-4 w-4" />
-          导出
+          {t('导出')}
         </button>
       </div>
     </header>
