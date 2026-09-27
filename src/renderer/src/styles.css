@@ -696,14 +696,6 @@ body.dark .theme-toggle .icon-moon { display: none; }
 .pl-text { font-size: 12px; color: #18181b; }
 .pl-text b { font-family: Consolas, monospace; font-weight: 600; }
 
-/* dev 性能小条：解析各阶段耗时 + 合成统计（仅 import.meta.env.DEV 渲染） */
-.perf-chip {
-  position: fixed; left: 10px; bottom: 8px; z-index: 60; pointer-events: none;
-  padding: 3px 9px; border-radius: 6px; font-size: 10.5px; line-height: 1.5;
-  font-family: Consolas, monospace; color: var(--txt-2);
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  border: 1px solid var(--line); backdrop-filter: blur(6px);
-}
 /* 入场时序：布局在加载层遮挡下挂载完成后（.entered）→ 加载层渐出 0.6s →
    画布 0.5s 起淡入 → 左右面板 1s 起最后滑入 */
 .detail.entered .canvas-mid { animation: mid-in 0.6s ease 0.5s both; }

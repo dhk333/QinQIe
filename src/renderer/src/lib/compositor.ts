@@ -40,9 +40,6 @@ export interface RasterImageData {
 
 export interface Env {
   createCanvas(w: number, h: number): RasterCanvas
-  /** dev 剖析钩子：叶子位图实际烘焙一次 / 叶子落笔一次时回调，不影响渲染结果 */
-  onBake?: () => void
-  onLeaf?: () => void
 }
 
 export interface Rect {
@@ -630,7 +627,6 @@ export function leafBitmap(n: RNode, env: Env): { canvas: RasterCanvas; rect: Re
   if (isEmpty(rect)) return null
   let content = base
   if (n.mask) content = applyMask(env, content, n.mask, n.left, n.top)
-  env.onBake?.()
   n.bitmap = { canvas: bake(env, content, n.left, n.top, rect, n.effects, n.fillOpacity), rect }
   return n.bitmap
 }
@@ -674,7 +670,6 @@ function hasVisibleContent(n: RNode, rc: RenderCtx): boolean {
 function paintLeaf(t: PaintTarget, n: RNode, rc: RenderCtx): void {
   const bmp = leafBitmap(n, rc.env)
   if (!bmp) return
-  rc.env.onLeaf?.()
   t.ctx.save()
   t.ctx.globalAlpha = n.opacity
   t.ctx.globalCompositeOperation = blendOf(n.blendMode)
@@ -1087,3 +1082,4 @@ export interface AgEffects {
   solidFill?: { enabled?: boolean; blendMode?: string; color?: AgColor; opacity?: number }[]
   gradientOverlay?: AgGradientOverlay[]
 }
+

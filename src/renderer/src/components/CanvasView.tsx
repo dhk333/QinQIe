@@ -2,7 +2,6 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'r
 import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
 import { buildCompositeCanvas, flattenLayers, readLayerPixels, type LayerBitmap } from '@/lib/psd'
-import { perfCompositeBegin, perfCompositeSpan } from '@/lib/perf'
 import { useT } from '@/i18n/core'
 
 export type CanvasTool = 'move' | 'slice' | 'picker' | 'hand'
@@ -273,14 +272,11 @@ export default function CanvasView({
       ctx.drawImage(preview, 0, 0)
     } else {
       if (!composite.current || composite.current.rnodes !== rnodes || composite.current.hiddenIds !== hiddenIds) {
-        const t0 = performance.now()
-        perfCompositeBegin()
         composite.current = {
           rnodes,
           hiddenIds,
           canvas: buildCompositeCanvas(doc, rnodes, hiddenIds)
         }
-        perfCompositeSpan(performance.now() - t0)
       }
       ctx.drawImage(composite.current.canvas, 0, 0)
     }
@@ -807,3 +803,4 @@ export default function CanvasView({
     </div>
   )
 }
+
