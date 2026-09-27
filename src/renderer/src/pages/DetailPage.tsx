@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { DocSlice, ExportFormat, Project, ProjectPsd } from '@/types'
+import type { DocSlice, ExportFormat, LayerEdit, Project, ProjectPsd } from '@/types'
 import {
   parsePsd,
   parsePsdFallback,
@@ -11,6 +11,7 @@ import {
   type LayerBitmap
 } from '@/lib/psd'
 import { decodeLayersInWorker, WorkerDecodeError } from '@/lib/psdWorker'
+import { applyLayerEdits, editBaseName, patchEdit, type LayerEdits } from '@/lib/layerEdits'
 import { exportCanvasBytes } from '@/lib/export'
 import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
 import { getUiPrefs } from '@/lib/uiPrefs'
@@ -60,11 +61,12 @@ function findInTree(nodes: PsdLayer[], id: number): PsdLayer | null {
 export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props) {
   const t = useT()
   const [doc, setDoc] = useState<PsdDoc | null>(null)
-  const [tree, setTree] = useState<PsdLayer[]>([])
+  /** 解析器直出的原始图层树与合成器节点树：编辑投影每次都从这两份算，不写回 */
+  const [rawTree, setTree] = useState<PsdLayer[]>([])
   const [decoding, setDecoding] = useState(false)
   /** 解码完成前画布用的 PSD 内嵌合成图占位 */
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null)
-  const [rnodes, setRnodes] = useState<RNode[]>([])
+  const [rawRnodes, setRnodes] = useState<RNode[]>([])
   const canvasMapRef = useRef<Map<number, LayerBitmap>>(new Map())
   /** 待执行的第二遍全量解码任务（入场动画点亮后交给 Worker 执行） */
   const decodeJobRef = useRef<{
@@ -248,6 +250,42 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     setSlicesRaw(next)
   }, [])
 
+  // 图层编辑量：只存 diff，按 layer.key 索引随项目 JSON 持久化，PSD 源文件永不回写
+  const [layerEdits, setLayerEditsRaw] = useState<LayerEdits>(() => psd.layerEdits ?? {})
+  const editSavedRef = useRef(layerEdits)
+  /** 面板写回的唯一入口：改哪一项就只传那一项，显式 undefined 表示恢复 PSD 原值 */
+  const patchLayerEdit = useCallback((layer: PsdLayer, patch: Partial<LayerEdit>) => {
+    setLayerEditsRaw((prev) => patchEdit(prev, layer.key, editBaseName(layer), patch))
+  }, [])
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (editSavedRef.current === layerEdits) return
+      editSavedRef.current = layerEdits
+      onUpdatePsd((p) => {
+        p.layerEdits = Object.keys(layerEdits).length ? layerEdits : undefined
+      })
+    }, 500)
+    return () => clearTimeout(t)
+  }, [layerEdits, onUpdatePsd])
+  // 清空是整篇级别的破坏性操作：一次确认，不做逐项撤销
+  const clearLayerEdits = useCallback(() => {
+    if (!Object.keys(layerEdits).length) return
+    void dialog({
+      type: 'confirm',
+      title: t('清空本文档的图层编辑？'),
+      desc: t('所有图层回到 PSD 原值，此操作不可撤销。'),
+      okText: t('清空'),
+      danger: true
+    }).then((ok) => {
+      if (ok) setLayerEditsRaw({})
+    })
+  }, [dialog, layerEdits, t])
+  // 投影发生在原始树之后、所有消费者之前：画布、图层树、面板、四条导出路径拿到的是同一份
+  const { tree, rnodes } = useMemo(
+    () => applyLayerEdits(rawTree, rawRnodes, layerEdits),
+    [rawTree, rawRnodes, layerEdits]
+  )
+
   // 面板拖拽
   const leftRef = useRef<HTMLElement>(null)
   const rightRef = useRef<HTMLElement>(null)
@@ -340,6 +378,10 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         editBaseRef.current = null
         histRef.current = { past: [], future: [] }
         sliceSeq.current = restored.reduce((m, s) => Math.max(m, Number(s.no) || 0), 0) + 1
+        // 图层编辑同样从项目 JSON 恢复；引用对齐避免挂载即触发一次无谓保存
+        const restoredEdits = psd.layerEdits ?? {}
+        editSavedRef.current = restoredEdits
+        setLayerEditsRaw(restoredEdits)
         setLoadTarget(60)
         setLoading(false)
         // 结构阶段跳过了全部位图（canvasMap 为空）时登记第二遍全量解码任务：
@@ -1339,6 +1381,9 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           rnodes={rnodes}
           canvasMap={canvasMapRef.current}
           hiddenIds={hiddenIds}
+          editCount={Object.keys(layerEdits).length}
+          onPatchEdit={patchLayerEdit}
+          onClearEdits={clearLayerEdits}
           onExport={handleExport}
         />
       </aside>

@@ -104,6 +104,9 @@ const BLEND_LABELS: Record<string, string> = {
   luminosity: '明度'
 }
 
+/** 混合模式下拉的候选，顺序即 PS 面板顺序（沿用 BLEND_LABELS 的声明序） */
+export const BLEND_MODES: string[] = Object.keys(BLEND_LABELS)
+
 export function blendLabel(mode: string): string {
   const label = BLEND_LABELS[mode]
   return label ? t(label) : mode
@@ -159,6 +162,8 @@ export function layerCssSnippet(
   lines.push(`top: ${len(layer.top)};`)
   lines.push(`width: ${len(layer.width)};`)
   lines.push(`height: ${len(layer.height)};`)
+  // 圆角只存在于合成器节点（面板写回时按短边钳制过），取它而不是编辑量原值
+  if (rnode?.radius) lines.push(`border-radius: ${len(rnode.radius)};`)
   if (layer.opacity < 0.999) lines.push(`opacity: ${Math.round(layer.opacity * 1000) / 1000};`)
   const cssBlend = BLEND_CSS[layer.blendMode]
   if (cssBlend) lines.push(`mix-blend-mode: ${cssBlend};`)

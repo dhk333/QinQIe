@@ -61,6 +61,38 @@ export default {
   '还没有切片，用切片工具在画布上拖拽创建': 'No slices yet — drag on the canvas with the Slice tool to create one',
   // 导出进度浮层
   '正在导出': 'Exporting',
-  '取消': 'Cancel'
+  '取消': 'Cancel',
+  // 属性面板：图层编辑（Figma 式改属性，不回写 PSD）
+  '恢复 PSD 原值': 'Reset to the PSD value',
+  '重置本图层的全部编辑': 'Reset all edits on this layer',
+  '重置': 'Reset',
+  '图层名': 'Layer name',
+  '变换': 'Transform',
+  '组的尺寸由子图层决定，不能直接改': 'A group is sized by its layers — this can’t be set directly',
+  '锁定宽高比': 'Lock aspect ratio',
+  '圆角': 'Radius',
+  '四角统一的圆角半径，导出位图与 CSS 都按它裁切':
+    'Corner radius applied to both the exported bitmap and the CSS',
+  '外观': 'Appearance',
+  '边框': 'Border',
+  '无': 'None',
+  '宽度': 'Width',
+  '边框宽度，0 即不加边框': 'Border width; 0 removes the border',
+  '内侧': 'Inside',
+  '居中': 'Center',
+  '外侧': 'Outside',
+  '角度': 'Angle',
+  '光源方向，与 PS 内建投影同义': 'Light direction, same as the built-in PS drop shadow',
+  '距离': 'Distance',
+  '大小': 'Size',
+  '投影模糊半径': 'Shadow blur radius',
+  '阻塞': 'Choke',
+  '投影实心程度': 'How solid the shadow stays',
+  '把本文档所有图层恢复到 PSD 原值': 'Restore every layer in this document to its PSD values',
+  '清空本文档编辑': 'Clear layer edits',
+  '清空本文档的图层编辑？': 'Clear all layer edits in this document?',
+  '所有图层回到 PSD 原值，此操作不可撤销。':
+    'Every layer returns to its PSD values. This can’t be undone.',
+  '清空': 'Clear'
 } as Record<string, string>
 

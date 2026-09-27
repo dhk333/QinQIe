@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react'
-import type { ExportFormat, PsdDoc, PsdLayer } from '@/types'
-import { blendLabel, layerCssSnippet, layerEffectNames, sampleColor } from '@/lib/export'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { BorderEdit, ExportFormat, LayerEdit, PsdDoc, PsdLayer, ShadowEdit } from '@/types'
+import { BLEND_MODES, blendLabel, layerCssSnippet, layerEffectNames, sampleColor } from '@/lib/export'
 import { loadExportPrefs } from '@/lib/exportPrefs'
 import type { CssUnit } from '@/lib/cssUnits'
 import { setUiPrefs, useUiPrefs } from '@/lib/uiPrefs'
 import { indexRNodes, renderLayerCanvas, type LayerBitmap } from '@/lib/psd'
 import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
-import { CheckIcon, ChevronRightIcon, CopyIcon } from './icons'
+import { CheckIcon, ChevronRightIcon, CopyIcon, LinkIcon, UndoIcon } from './icons'
 import Slider from './Slider'
 
 interface Props {
@@ -16,13 +16,28 @@ interface Props {
   rnodes: RNode[]
   canvasMap: Map<number, LayerBitmap>
   hiddenIds: Set<number>
+  /** 本文档已改过的图层数：>0 时才给「清空本文档编辑」 */
+  editCount: number
+  onPatchEdit: (layer: PsdLayer, patch: Partial<LayerEdit>) => void
+  onClearEdits: () => void
   onExport: (format: ExportFormat, scale: number, quality?: number) => void
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  action,
+  children
+}: {
+  title: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <section className="border-b border-border px-4 pb-4 pt-3.5">
-      <h3 className="mb-3 text-[12px] font-semibold tracking-normal text-txt">{title}</h3>
+      <div className="mb-3 flex items-center gap-1.5">
+        <h3 className="text-[12px] font-semibold tracking-normal text-txt">{title}</h3>
+        {action}
+      </div>
       {children}
     </section>
   )
@@ -102,6 +117,214 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   )
 }
 
+const numCls =
+  'w-full min-w-0 rounded-md border border-border bg-panel-2 py-1 pl-2 pr-1.5 font-mono text-[11.5px] text-txt outline-none transition-colors [appearance:textfield] hover:border-border-light focus:border-accent [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+
+/** 描边三档位置的展示文案（中文原文作 i18n key） */
+const POSITION_LABEL: Record<BorderEdit['position'], string> = {
+  inside: '内侧',
+  center: '居中',
+  outside: '外侧'
+}
+
+/** 把编辑过的字段标成强调色，一眼看出哪些值不是 PSD 原值 */
+function FieldLabel({ text, dirty }: { text: string; dirty: boolean }) {
+  return (
+    <span className={`shrink-0 text-[11.5px] ${dirty ? 'text-accent' : 'text-txt-3'}`}>{text}</span>
+  )
+}
+
+/** 「回到 PSD 原值」：只在该项被改过时出现；定位交给调用方，这里只管点击与外观 */
+function ResetBtn({ onClick, title }: { onClick: () => void; title?: string }) {
+  const t = useT()
+  return (
+    <button
+      type="button"
+      title={title || t('恢复 PSD 原值')}
+      aria-label={t('恢复 PSD 原值')}
+      onClick={onClick}
+      className="shrink-0 rounded p-0.5 text-txt-3 transition-colors hover:bg-panel-2 hover:text-txt"
+    >
+      <UndoIcon className="h-3.5 w-3.5" />
+    </button>
+  )
+}
+
+/**
+ * 数字字段：本地草稿允许「空 / 负号」这类输入中间态，解析成功才写回，
+ * 失焦后无条件回读已生效值——否则半截输入会永久留在框里骗人。
+ */
+function NumField({
+  label,
+  value,
+  dirty,
+  min = 0,
+  allowNegative,
+  disabled,
+  title,
+  onCommit,
+  onReset
+}: {
+  label: string
+  value: number
+  dirty?: boolean
+  min?: number
+  allowNegative?: boolean
+  disabled?: boolean
+  title?: string
+  onCommit: (v: number) => void
+  onReset?: () => void
+}) {
+  const round = (n: number) => Math.round(n * 100) / 100
+  const [text, setText] = useState(() => String(round(value)))
+  const typing = useRef(false)
+  useEffect(() => {
+    if (!typing.current) setText(String(round(value)))
+  }, [value])
+  const lo = allowNegative ? -Infinity : min
+  return (
+    <label className="flex min-w-0 flex-1 items-center gap-1.5" title={title}>
+      <FieldLabel text={label} dirty={!!dirty} />
+      <span className="relative flex min-w-0 flex-1 items-center">
+        <input
+          type="number"
+          className={numCls}
+          style={dirty && onReset ? { paddingRight: 20 } : undefined}
+          value={text}
+          disabled={disabled}
+          onFocus={() => {
+            typing.current = true
+          }}
+          onChange={(e) => {
+            setText(e.target.value)
+            const n = Number(e.target.value)
+            if (!e.target.value.trim() || !Number.isFinite(n)) return
+            onCommit(Math.max(lo, Math.min(100000, Math.round(n))))
+          }}
+          onBlur={() => {
+            typing.current = false
+            setText(String(round(value)))
+          }}
+        />
+        {dirty && onReset && (
+          <span className="absolute right-1 top-1/2 -translate-y-1/2">
+            <ResetBtn
+              title={title}
+              onClick={() => {
+                setText(String(round(value)))
+                onReset()
+              }}
+            />
+          </span>
+        )}
+      </span>
+    </label>
+  )
+}
+
+/** 文本字段：改名允许中间态（含空格），失焦才落定，空名回退原名 */
+function TextField({
+  label,
+  value,
+  fallback,
+  maxLength,
+  onCommit
+}: {
+  label: string
+  value: string
+  fallback: string
+  maxLength: number
+  onCommit: (v: string) => void
+}) {
+  const [text, setText] = useState(value)
+  const typing = useRef(false)
+  useEffect(() => {
+    if (!typing.current) setText(value)
+  }, [value])
+  return (
+    <input
+      type="text"
+      aria-label={label}
+      className="w-full min-w-0 truncate rounded-md border border-border bg-panel-2 px-2 py-1 text-[13px] font-medium text-txt outline-none transition-colors hover:border-border-light focus:border-accent"
+      value={text}
+      maxLength={maxLength}
+      onFocus={() => {
+        typing.current = true
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        typing.current = false
+        const v = text.trim()
+        setText(v || fallback)
+        if (v && v !== value) onCommit(v)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') {
+          setText(value)
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
+    />
+  )
+}
+
+/** 百分比字段：滑杆给手感、数字给精度，两者同一个值 */
+function PctField({
+  label,
+  value,
+  dirty,
+  onCommit,
+  onReset
+}: {
+  label: string
+  value: number
+  dirty: boolean
+  onCommit: (v: number) => void
+  onReset: () => void
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <FieldLabel text={label} dirty={dirty} />
+      <Slider
+        min={0}
+        max={1}
+        step={0.01}
+        value={value}
+        onChange={(v) => onCommit(Math.round(v * 100) / 100)}
+      />
+      <b className="w-10 shrink-0 text-right font-mono text-[11px] text-txt-2">
+        {Math.round(value * 100)}%
+      </b>
+      {dirty && <ResetBtn onClick={onReset} />}
+    </div>
+  )
+}
+
+/** 颜色字段：原生取色器 + 十六进制文本，两个入口写同一个值 */
+function ColorField({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+      <input
+        type="color"
+        value={/^#[0-9a-f]{6}$/i.test(value) ? value : '#000000'}
+        onChange={(e) => onChange(e.target.value.toUpperCase())}
+        className="h-6 w-7 shrink-0 cursor-pointer rounded-md border border-border bg-panel-2 p-0.5"
+      />
+      <input
+        type="text"
+        value={value}
+        maxLength={7}
+        onChange={(e) => {
+          const v = e.target.value.startsWith('#') ? e.target.value : `#${e.target.value}`
+          if (/^#[0-9a-f]{6}$/i.test(v)) onChange(v.toUpperCase())
+        }}
+        className="w-full min-w-0 rounded-md border border-border bg-panel-2 px-2 py-1 font-mono text-[11.5px] uppercase text-txt outline-none transition-colors hover:border-border-light focus:border-accent"
+      />
+    </span>
+  )
+}
+
 const CSS_TOKEN_RE =
   /(\/\*.*?\*\/)|('[^']*'|"[^"]*")|(#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\b)|([;:])/gi
 
@@ -154,7 +377,17 @@ function CssCode({ css }: { css: string }) {
   )
 }
 
-export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenIds, onExport }: Props) {
+export default function PropertiesPanel({
+  layer,
+  doc,
+  rnodes,
+  canvasMap,
+  hiddenIds,
+  editCount,
+  onPatchEdit,
+  onClearEdits,
+  onExport
+}: Props) {
   const t = useT()
   const [format, setFormat] = useState<ExportFormat>(() => loadExportPrefs().format)
   const [scale, setScale] = useState(() => loadExportPrefs().scales[0])
@@ -165,6 +398,10 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
   const [exportOpen, setExportOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewSeen, setPreviewSeen] = useState(false)
+  const [borderOpen, setBorderOpen] = useState(false)
+  const [fxOpen, setFxOpen] = useState(false)
+  /** 宽高比锁定：改一边自动带上另一边 */
+  const [lockRatio, setLockRatio] = useState(false)
 
   const rnodeMap = useMemo(() => indexRNodes(rnodes), [rnodes])
   const rnode = layer ? rnodeMap.get(layer.id) : undefined
@@ -215,6 +452,47 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
   const typeLabel =
     layer.type === 'group' ? t('图层组') : layer.isText ? t('文本图层') : t('像素图层')
 
+  // 生效中的编辑量由投影写在 layer.edit 上：面板据此标出哪几项已偏离 PSD 原值
+  const edit = layer.edit
+  const isGroup = layer.type === 'group'
+  const patch = (p: Partial<LayerEdit>) => onPatchEdit(layer, p)
+  /** 位置按「相对 PSD 原位的偏移」存，写回只做「新值 − 当前显示值」，组位移与层位移才能各自累加 */
+  const setPos = (axis: 'dx' | 'dy', v: number) => {
+    const shown = axis === 'dx' ? Math.round(layer.left) : Math.round(layer.top)
+    const base = (axis === 'dx' ? edit?.dx : edit?.dy) ?? 0
+    patch({ [axis]: base + (v - shown) } as Partial<LayerEdit>)
+  }
+  const borderDefaults: BorderEdit = {
+    size: 1,
+    color: '#000000',
+    opacity: 1,
+    position: 'inside'
+  }
+  const shadowDefaults: ShadowEdit = {
+    color: '#000000',
+    opacity: 0.5,
+    angle: 90,
+    distance: 8,
+    size: 8,
+    choke: 0
+  }
+  const border = { ...borderDefaults, ...(edit?.border ?? borderDefaults) }
+  const shadow = { ...shadowDefaults, ...(edit?.shadow ?? shadowDefaults) }
+  // 宽度归零即撤销这圈边框：留着一条 size=0 的编辑只会让「已改过」的标记说谎
+  const setBorder = (p: Partial<BorderEdit>) => {
+    const next = { ...border, ...p }
+    patch({ border: next.size <= 0 ? undefined : next })
+  }
+  const setShadow = (p: Partial<ShadowEdit>) => patch({ shadow: { ...shadow, ...p } })
+  const setW = (v: number) => {
+    if (!lockRatio || !layer.height || !layer.width) return patch({ width: v })
+    patch({ width: v, height: Math.max(1, Math.round((v * layer.height) / layer.width)) })
+  }
+  const setH = (v: number) => {
+    if (!lockRatio || !layer.height || !layer.width) return patch({ height: v })
+    patch({ height: v, width: Math.max(1, Math.round((v * layer.width) / layer.height)) })
+  }
+
   const exportSummary = `${{ png: 'PNG', jpeg: 'JPG', webp: 'WebP' }[format]} · @${scale}x${
     format === 'png' ? '' : ` · ${Math.round(quality * 100)}%`
   }`
@@ -225,18 +503,47 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
         {t('属性')}
       </div>
 
-      <Section title={t('图层')}>
-        <p className="mb-2 truncate text-[13px] font-medium text-txt" title={layer.name}>
-          {layer.name}
-        </p>
+      <Section
+        title={t('图层')}
+        action={
+          edit && (
+            <button
+              type="button"
+              className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-txt-3 transition-colors hover:bg-panel-2 hover:text-txt"
+              title={t('重置本图层的全部编辑')}
+              onClick={() =>
+                patch({
+                  name: undefined,
+                  dx: undefined,
+                  dy: undefined,
+                  width: undefined,
+                  height: undefined,
+                  opacity: undefined,
+                  blendMode: undefined,
+                  radius: undefined,
+                  border: undefined,
+                  shadow: undefined
+                })
+              }
+            >
+              <UndoIcon className="h-3 w-3" />
+              {t('重置')}
+            </button>
+          )
+        }
+      >
+        <TextField
+          key={`name-${layer.id}`}
+          label={t('图层名')}
+          value={layer.name}
+          fallback={layer.edit?.baseName ?? layer.name}
+          maxLength={80}
+          onCommit={(v) => patch({ name: v === layer.edit?.baseName ? undefined : v })}
+        />
         <InfoRow label={t('类型')} value={typeLabel} />
-        <InfoRow label={t('位置')} value={`X ${layer.left}, Y ${layer.top}`} />
-        <InfoRow label={t('尺寸')} value={`${layer.width} × ${layer.height}`} />
-        <InfoRow label={t('不透明度')} value={`${Math.round(layer.opacity * 100)}%`} />
         {rnode && rnode.fillOpacity < 0.999 && (
           <InfoRow label={t('填充不透明度')} value={`${Math.round(rnode.fillOpacity * 100)}%`} />
         )}
-        <InfoRow label={t('混合模式')} value={blendLabel(layer.blendMode)} />
         {layer.clipping && <InfoRow label={t('剪贴蒙版')} value={t('是')} />}
         {rnode?.mask && !rnode.mask.disabled && <InfoRow label={t('图层蒙版')} value={t('有')} />}
         {layerEffectNames(rnode).length > 0 && (
@@ -244,6 +551,208 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
         )}
         {layer.hidden && <InfoRow label={t('可见性')} value={t('已隐藏')} />}
       </Section>
+
+      <Section title={t('变换')}>
+        <div key={`tf-${layer.id}`} className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <NumField
+              label="X"
+              value={Math.round(layer.left)}
+              allowNegative
+              dirty={edit?.dx !== undefined}
+              title={t('位置')}
+              onCommit={(v) => setPos('dx', v)}
+              onReset={() => patch({ dx: undefined })}
+            />
+            <NumField
+              label="Y"
+              value={Math.round(layer.top)}
+              allowNegative
+              dirty={edit?.dy !== undefined}
+              title={t('位置')}
+              onCommit={(v) => setPos('dy', v)}
+              onReset={() => patch({ dy: undefined })}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <NumField
+              label="W"
+              value={Math.round(layer.width)}
+              min={1}
+              disabled={isGroup}
+              dirty={edit?.width !== undefined}
+              title={isGroup ? t('组的尺寸由子图层决定，不能直接改') : t('尺寸')}
+              onCommit={setW}
+              onReset={() => patch({ width: undefined })}
+            />
+            <button
+              type="button"
+              className={`shrink-0 rounded-md border p-1 transition-colors ${
+                lockRatio
+                  ? 'border-accent bg-accent-dim text-txt'
+                  : 'border-border bg-panel-2 text-txt-3 hover:border-border-light'
+              }`}
+              title={t('锁定宽高比')}
+              aria-pressed={lockRatio}
+              onClick={() => setLockRatio((v) => !v)}
+            >
+              <LinkIcon className="h-3.5 w-3.5" />
+            </button>
+            <NumField
+              label="H"
+              value={Math.round(layer.height)}
+              min={1}
+              disabled={isGroup}
+              dirty={edit?.height !== undefined}
+              title={isGroup ? t('组的尺寸由子图层决定，不能直接改') : t('尺寸')}
+              onCommit={setH}
+              onReset={() => patch({ height: undefined })}
+            />
+          </div>
+          <NumField
+            label={t('圆角')}
+            value={Math.round(edit?.radius ?? rnode?.radius ?? 0)}
+            dirty={edit?.radius !== undefined}
+            title={t('四角统一的圆角半径，导出位图与 CSS 都按它裁切')}
+            onCommit={(v) => patch({ radius: v > 0 ? v : undefined })}
+            onReset={() => patch({ radius: undefined })}
+          />
+        </div>
+      </Section>
+
+      <Section title={t('外观')}>
+        <div key={`ap-${layer.id}`} className="flex flex-col gap-2.5">
+          <PctField
+            label={t('不透明度')}
+            value={layer.opacity}
+            dirty={edit?.opacity !== undefined}
+            onCommit={(v) => patch({ opacity: v })}
+            onReset={() => patch({ opacity: undefined })}
+          />
+          <div className="flex items-center gap-1.5">
+            <FieldLabel text={t('混合模式')} dirty={edit?.blendMode !== undefined} />
+            <select
+              className="min-w-0 flex-1 cursor-pointer rounded-md border border-border bg-panel-2 px-1.5 py-1 text-[11.5px] text-txt outline-none transition-colors hover:border-border-light focus:border-accent"
+              value={layer.blendMode}
+              onChange={(e) => patch({ blendMode: e.target.value })}
+            >
+              {!BLEND_MODES.includes(layer.blendMode) && (
+                <option value={layer.blendMode}>{blendLabel(layer.blendMode)}</option>
+              )}
+              {BLEND_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {blendLabel(m)}
+                </option>
+              ))}
+            </select>
+            {edit?.blendMode !== undefined && (
+              <ResetBtn onClick={() => patch({ blendMode: undefined })} />
+            )}
+          </div>
+        </div>
+      </Section>
+
+      <CollapsibleSection
+        id="border-section"
+        title={t('边框')}
+        open={borderOpen}
+        onToggle={() => setBorderOpen((v) => !v)}
+        summary={
+          edit?.border
+            ? `${edit.border.size}px ${t(POSITION_LABEL[edit.border.position])}`
+            : t('无')
+        }
+      >
+        <div key={`bd-${layer.id}`} className="flex flex-col gap-2.5">
+          <NumField
+            label={t('宽度')}
+            value={edit?.border?.size ?? 0}
+            dirty={!!edit?.border}
+            title={t('边框宽度，0 即不加边框')}
+            onCommit={(v) => setBorder({ size: v })}
+            onReset={() => patch({ border: undefined })}
+          />
+          <div className="flex items-center gap-1.5">
+            <FieldLabel text={t('颜色')} dirty={!!edit?.border} />
+            <ColorField value={border.color} onChange={(c) => setBorder({ color: c })} />
+          </div>
+          <div className="flex gap-1.5">
+            {(['inside', 'center', 'outside'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={optCls(border.position === p)}
+                onClick={() => setBorder({ position: p })}
+              >
+                {t(POSITION_LABEL[p])}
+              </button>
+            ))}
+          </div>
+          <PctField
+            label={t('不透明度')}
+            value={border.opacity}
+            dirty={!!edit?.border}
+            onCommit={(v) => setBorder({ opacity: v })}
+            onReset={() => patch({ border: undefined })}
+          />
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        id="effect-section"
+        title={t('投影')}
+        open={fxOpen}
+        onToggle={() => setFxOpen((v) => !v)}
+        summary={edit?.shadow ? `${t('距离')} ${edit.shadow.distance} · ${t('大小')} ${edit.shadow.size}` : t('无')}
+      >
+        <div key={`fx-${layer.id}`} className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-1.5">
+            <FieldLabel text={t('颜色')} dirty={!!edit?.shadow} />
+            <ColorField value={shadow.color} onChange={(c) => setShadow({ color: c })} />
+            {edit?.shadow && <ResetBtn onClick={() => patch({ shadow: undefined })} />}
+          </div>
+          <PctField
+            label={t('不透明度')}
+            value={shadow.opacity}
+            dirty={!!edit?.shadow}
+            onCommit={(v) => setShadow({ opacity: v })}
+            onReset={() => patch({ shadow: undefined })}
+          />
+          <div className="flex gap-2">
+            <NumField
+              label={t('角度')}
+              value={Math.round(shadow.angle)}
+              allowNegative
+              min={-360}
+              dirty={!!edit?.shadow}
+              title={t('光源方向，与 PS 内建投影同义')}
+              onCommit={(v) => setShadow({ angle: v })}
+            />
+            <NumField
+              label={t('距离')}
+              value={Math.round(shadow.distance)}
+              dirty={!!edit?.shadow}
+              onCommit={(v) => setShadow({ distance: v })}
+            />
+          </div>
+          <div className="flex gap-2">
+            <NumField
+              label={t('大小')}
+              value={Math.round(shadow.size)}
+              dirty={!!edit?.shadow}
+              title={t('投影模糊半径')}
+              onCommit={(v) => setShadow({ size: v })}
+            />
+            <NumField
+              label={t('阻塞')}
+              value={Math.round(shadow.choke)}
+              dirty={!!edit?.shadow}
+              title={t('投影实心程度')}
+              onCommit={(v) => setShadow({ choke: v })}
+            />
+          </div>
+        </div>
+      </CollapsibleSection>
 
       {color && (
         <Section title={t('取色')}>
@@ -421,6 +930,19 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
           {t('导出所选图层')}
         </button>
       </CollapsibleSection>
+
+      {editCount > 0 && (
+        <div className="px-4 py-3">
+          <button
+            type="button"
+            className="btn btn-ghost w-full text-[11.5px] text-txt-3"
+            title={t('把本文档所有图层恢复到 PSD 原值')}
+            onClick={onClearEdits}
+          >
+            {t('清空本文档编辑')} · {editCount}
+          </button>
+        </div>
+      )}
     </aside>
   )
 }

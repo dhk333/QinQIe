@@ -27,9 +27,9 @@ export interface PsdLayer {
   clipping: boolean
   blendMode: string
   children?: PsdLayer[]
-  /** 下面两项由编辑覆盖层写入，供面板回显与 CSS 生成，渲染仍以合成器节点为准 */
-  radius?: number
-  border?: BorderEdit
+  /** 由编辑投影写入的「本层生效的编辑量」，供面板回显哪几项被改过、CSS 生成取用。
+   *  改过名之后 layer.name 已是新名，只有这里还留着 baseName，写回时靠它续上同一条编辑 */
+  edit?: LayerEdit
 }
 
 export interface PsdDoc {

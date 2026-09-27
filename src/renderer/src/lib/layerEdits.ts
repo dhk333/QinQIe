@@ -166,7 +166,7 @@ function project(
   if (e?.opacity !== undefined) rt.opacity = e.opacity
   if (e?.blendMode) rt.blendMode = e.blendMode
 
-  const et: PsdLayer = { ...t, name: e?.name || t.name }
+  const et: PsdLayer = { ...t, name: e?.name || t.name, edit: e }
   if (kids) et.children = kids
   if (kids && !isLeaf) {
     Object.assign(et, unionOfLayers(kids))
@@ -178,8 +178,6 @@ function project(
   }
   if (e?.opacity !== undefined) et.opacity = e.opacity
   if (e?.blendMode) et.blendMode = e.blendMode
-  if (radius !== undefined) et.radius = radius
-  if (e?.border) et.border = e.border
   return [et, rt]
 }
 
@@ -231,8 +229,15 @@ function isEditable(e: LayerEdit): boolean {
   return FIELDS.some((f) => e[f] !== undefined)
 }
 
-/** 局部改写一条编辑：patch 里显式传 undefined 即清掉该项，整条空了就删掉 */
-export function patchEdit(
+/**
+ * 写回编辑时要登记的原始图层名。投影后的层若已改名，layer.name 是新名，
+ * 只有 layer.edit.baseName 还留着 PSD 里的原名——续上它才不会另起一条贴错图层的编辑。
+ */
+export function editBaseName(layer: PsdLayer): string {
+  return layer.edit?.baseName ?? layer.name
+}
+
+/** 局部改写一条编辑：patch 里显式传 undefined 即清掉该项，整条空了就删掉 */export function patchEdit(
   edits: LayerEdits,
   key: string,
   baseName: string,
@@ -250,10 +255,4 @@ export function dropEdit(edits: LayerEdits, key: string): LayerEdits {
   const out: LayerEdits = { ...edits }
   delete out[key]
   return out
-}
-
-/** 该图层当前生效的编辑；baseName 不符（结构漂移）时视为无编辑 */
-export function editFor(edits: LayerEdits, layer: PsdLayer): LayerEdit | undefined {
-  const e = edits[layer.key]
-  return e && e.baseName === layer.name ? e : undefined
 }
