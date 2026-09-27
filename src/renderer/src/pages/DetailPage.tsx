@@ -68,7 +68,11 @@ function PerfChip() {
   }
   const parts = rep.phases.map((p) => `${label[p.phase]} ${p.ms}ms`)
   if (rep.composite.count > 0) {
-    parts.push(`${t('合成')} ${rep.composite.last}ms×${rep.composite.count}`)
+    const d = rep.detail
+    parts.push(
+      `${t('合成')} ${rep.composite.last}ms×${rep.composite.count}` +
+        ` [烘焙${d.bakes} 叶${d.leaves} 画布${d.canvases}/${(d.canvasPx / 1e6).toFixed(0)}Mpx]`
+    )
   }
   return <div className="perf-chip">{parts.join(' · ')}</div>
 }

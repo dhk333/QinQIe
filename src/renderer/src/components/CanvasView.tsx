@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'r
 import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
 import { buildCompositeCanvas, flattenLayers } from '@/lib/psd'
-import { perfCompositeSpan } from '@/lib/perf'
+import { perfCompositeBegin, perfCompositeSpan } from '@/lib/perf'
 import { useT } from '@/i18n/core'
 
 export type CanvasTool = 'move' | 'slice' | 'picker' | 'hand'
@@ -267,6 +267,7 @@ export default function CanvasView({
     ctx.fillRect(0, 0, doc.width, doc.height)
     if (!composite.current || composite.current.rnodes !== rnodes || composite.current.hiddenIds !== hiddenIds) {
       const t0 = performance.now()
+      perfCompositeBegin()
       composite.current = {
         rnodes,
         hiddenIds,

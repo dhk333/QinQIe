@@ -1,5 +1,6 @@
 import { readPsd, type Layer, type Psd } from 'ag-psd'
 import type { PsdDoc, PsdLayer } from '@/types'
+import { perfBake, perfCanvasCreated, perfLeafPaint } from './perf'
 import {
   buildRNode,
   compositeDocument,
@@ -28,8 +29,11 @@ export const browserEnv: Env = {
     // 先按 willReadFrequently 建上下文：合成器会大量 getImageData/putImageData，
     // 让 Chrome 把这些离屏画布放在 CPU 后端，避免每次读回像素都走 GPU 同步回读
     c.getContext('2d', { willReadFrequently: true })
+    perfCanvasCreated(c.width * c.height)
     return c
-  }
+  },
+  onBake: perfBake,
+  onLeaf: perfLeafPaint
 }
 
 // ag-psd 的文本内容在 text.text，字体名在 text.style.font.name，

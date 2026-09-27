@@ -37,6 +37,9 @@ export interface RasterImageData {
 
 export interface Env {
   createCanvas(w: number, h: number): RasterCanvas
+  /** dev 剖析钩子：叶子位图实际烘焙一次 / 叶子落笔一次时回调，不影响渲染结果 */
+  onBake?: () => void
+  onLeaf?: () => void
 }
 
 export interface Rect {
@@ -143,6 +146,15 @@ export interface RNode {
   children?: RNode[]
   /** 叶子位图的惰性缓存（蒙版+样式烘焙结果） */
   bitmap?: { canvas: RasterCanvas; rect: Rect } | null
+  // ---- 以下均为合成期内部惰性缓存，不承载文档语义，构建 RNode 时无需赋值 ----
+  /** 组级分段缓存：可见性签名命中时整组一次 blit，避免全文档重落笔 */
+  seg?: { sig: number; rect: Rect; canvas: RasterCanvas } | null
+  /** 最近一次可见性签名及其对应的 hiddenIds 引用 */
+  _sig?: number
+  _sigKey?: Set<number> | null
+  /** 子树叶子数与「背景无关性」的记忆化结果 */
+  _lc?: number
+  _indep?: boolean
 }
 
 const BLEND_MAP: Record<string, string> = {
@@ -614,6 +626,7 @@ export function leafBitmap(n: RNode, env: Env): { canvas: RasterCanvas; rect: Re
   if (isEmpty(rect)) return null
   let content = base
   if (n.mask) content = applyMask(env, content, n.mask, n.left, n.top)
+  env.onBake?.()
   n.bitmap = { canvas: bake(env, content, n.left, n.top, rect, n.effects, n.fillOpacity), rect }
   return n.bitmap
 }
@@ -621,6 +634,7 @@ export function leafBitmap(n: RNode, env: Env): { canvas: RasterCanvas; rect: Re
 export function invalidateBitmaps(nodes: RNode[]): void {
   for (const n of nodes) {
     n.bitmap = null
+    n.seg = null
     if (n.children) invalidateBitmaps(n.children)
   }
 }
@@ -656,6 +670,7 @@ function hasVisibleContent(n: RNode, rc: RenderCtx): boolean {
 function paintLeaf(t: PaintTarget, n: RNode, rc: RenderCtx): void {
   const bmp = leafBitmap(n, rc.env)
   if (!bmp) return
+  rc.env.onLeaf?.()
   t.ctx.save()
   t.ctx.globalAlpha = n.opacity
   t.ctx.globalCompositeOperation = blendOf(n.blendMode)
@@ -756,21 +771,90 @@ function needsOffscreen(n: RNode): boolean {
   return false
 }
 
+/** 子树叶子数（结构静态量，记忆化一次） */
+function countLeaves(n: RNode): number {
+  if (n._lc !== undefined) return n._lc
+  if (n.kind === 'layer') return (n._lc = 1)
+  let c = 0
+  for (const ch of n.children ?? []) c += countLeaves(ch)
+  n._lc = c
+  return c
+}
+
+/**
+ * 子树是否「背景无关」：整棵子树最终只以 source-over 落在底图上。
+ * source-over 满足结合律，先把子树烘焙到透明画布再一次性 blit 与逐层直绘逐像素等价。
+ * 剪贴链在链缓冲内部完成 destination-in 裁切，链基底只要 source-over 就不破坏独立性。
+ */
+function indepList(nodes: RNode[]): boolean {
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]
+    if (n.clipping) continue // 无基底的孤儿剪贴层不落笔，天然独立
+    if (blendOf(n.blendMode) !== 'source-over') return false
+    // 链上剪贴层（clipping=true）只参与链内部合成，其自身混合模式不影响链外
+    while (i + 1 < nodes.length && nodes[i + 1].clipping) i++
+    if (n.kind === 'group' && !needsOffscreen(n) && !indepGroup(n)) return false
+  }
+  return true
+}
+
+function indepGroup(n: RNode): boolean {
+  if (n._indep !== undefined) return n._indep
+  const r = needsOffscreen(n)
+    ? blendOf(n.blendMode) === 'source-over'
+    : blendOf(n.blendMode) === 'source-over' && indepList(n.children ?? [])
+  n._indep = r
+  return r
+}
+
+/** 子树可见性签名：同一次显隐状态下重复合成可命中组缓存，按 hiddenIds 引用记忆化 */
+function sigOf(n: RNode, rc: RenderCtx): number {
+  if (n._sigKey === (rc.hiddenIds ?? null)) return n._sig ?? 0
+  let h = isHidden(n, rc) ? 7919 : 104729
+  if (n.kind === 'group') {
+    for (const c of n.children ?? []) {
+      h = (Math.imul(h, 31) + sigOf(c, rc)) | 0
+    }
+  }
+  n._sig = h
+  n._sigKey = rc.hiddenIds ?? null
+  return h
+}
+
+function sameRect(a: Rect, b: Rect): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+}
+
+/** 值得建组级缓存的最小叶子数：小组直绘更便宜，缓存只会白占内存 */
+const SEG_MIN_LEAVES = 6
+
 function paintGroup(t: PaintTarget, n: RNode, rc: RenderCtx): void {
-  if (needsOffscreen(n)) {
-    const rect = intersectRect(nodeRect(n), t.clip)
-    if (isEmpty(rect)) return
-    const r = renderGroup(n, rc, rect)
-    if (!r) return
-    const out = hasEffects(n.effects) ? bake(rc.env, r.canvas, r.rect.x, r.rect.y, r.rect, n.effects, 1) : r.canvas
-    t.ctx.save()
-    t.ctx.globalAlpha = n.opacity
-    t.ctx.globalCompositeOperation = blendOf(n.blendMode)
-    t.ctx.drawImage(out, r.rect.x - t.ox, r.rect.y - t.oy)
-    t.ctx.restore()
+  const off = needsOffscreen(n)
+  if (!off && !indepGroup(n)) {
+    paintList(t, n.children ?? [], rc)
     return
   }
-  paintList(t, n.children ?? [], rc)
+  const rect = intersectRect(nodeRect(n), t.clip)
+  if (isEmpty(rect)) return
+  const cacheable = countLeaves(n) >= SEG_MIN_LEAVES
+  const sig = cacheable ? sigOf(n, rc) : 0
+  if (cacheable && n.seg && n.seg.sig === sig && sameRect(n.seg.rect, rect)) {
+    blitGroup(t, n, n.seg.canvas, n.seg.rect)
+    return
+  }
+  const r = renderGroup(n, rc, rect)
+  if (!r) return
+  const out = hasEffects(n.effects) ? bake(rc.env, r.canvas, r.rect.x, r.rect.y, r.rect, n.effects, 1) : r.canvas
+  if (cacheable) n.seg = { sig, rect: r.rect, canvas: out }
+  blitGroup(t, n, out, r.rect)
+}
+
+function blitGroup(t: PaintTarget, n: RNode, canvas: RasterCanvas, rect: Rect): void {
+  t.ctx.save()
+  t.ctx.globalAlpha = n.opacity
+  t.ctx.globalCompositeOperation = blendOf(n.blendMode)
+  t.ctx.drawImage(canvas, rect.x - t.ox, rect.y - t.oy)
+  t.ctx.restore()
 }
 
 /** 把一个组离屏合成为一张画布（含组蒙版） */
