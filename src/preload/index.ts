@@ -10,7 +10,8 @@ const api = {
   saveProjects: (data: unknown): Promise<boolean> => ipcRenderer.invoke('projects:save', data),
   // PSD 文件
   pickPsdPaths: (): Promise<string[]> => ipcRenderer.invoke('psd:pick'),
-  importPsds: (paths: string[]) => ipcRenderer.invoke('psd:import', paths),
+  importPsds: (paths: string[], maxThumbBytes?: number) =>
+    ipcRenderer.invoke('psd:import', paths, maxThumbBytes),
   readPsdByPath: (path: string): Promise<{ name: string; buffer: Uint8Array }> =>
     ipcRenderer.invoke('psd:read', path),
   fileExists: (p: string): Promise<boolean> => ipcRenderer.invoke('file:exists', p),
@@ -28,6 +29,8 @@ const api = {
   dataStats: (): Promise<{ root: string; total: number; thumbs: number }> =>
     ipcRenderer.invoke('app:data-stats'),
   clearThumbCache: (): Promise<number> => ipcRenderer.invoke('app:clear-thumb-cache'),
+  trimThumbCache: (maxBytes: number): Promise<{ deleted: number; freed: number }> =>
+    ipcRenderer.invoke('app:trim-thumb-cache', maxBytes),
   // 更新检查
   checkUpdate: (): Promise<
     | { status: 'new'; version: string; url: string; notes: string }

@@ -1,6 +1,9 @@
 export default {
   // SettingsPage.tsx — 左侧导航（分组 / 条目，NAV 数据键）
   '通用': 'General',
+  '效率': 'Efficiency',
+  '快捷键': 'Shortcuts',
+  '版本记录': 'Release Notes',
   '主题': 'Theme',
   '语言': 'Language',
   '存储与缓存': 'Storage & Cache',
@@ -84,5 +87,38 @@ export default {
   '检查更新失败，请检查网络后重试': 'Update check failed — check your network and retry',
   // 快捷键分区
   '点击键帽后按下新组合即可改绑，自动提示冲突；单条 ↺ 恢复，或全部恢复默认。自定义仅保存在本机。':
-    'Click a keycap, then press a new combination to rebind; conflicts are detected automatically. Use ↺ to reset one, or reset all to defaults. Customizations are stored locally only.'
+    'Click a keycap, then press a new combination to rebind; conflicts are detected automatically. Use ↺ to reset one, or reset all to defaults. Customizations are stored locally only.',
+  // 导出设置：命名模板与 CSS 单位（词条 '命名模板' / '可用变量：…' 见 detail.ts）
+  '变量：{名称} 图层或切片名 · {倍数} @2x 中的 2 · {格式} png / jpg / webp · {序号} 批量内递增':
+    'Variables: {名称} layer or slice name · {倍数} the 2 in @2x · {格式} png / jpg / webp · {序号} counter inside one batch',
+  'CSS 单位': 'CSS unit',
+  '基准 px': 'base px',
+  '画布宽 px': 'canvas width px',
+  '详情页属性面板导出的 CSS 代码按此单位换算；vw 默认按当前画布宽度换算，画布未知时用上面的基准值':
+    'CSS shown in the detail-page properties panel converts to this unit; vw uses the current artboard width, falling back to the base value above',
+  // 启动与更新
+  '启动与更新': 'Startup & Updates',
+  '开关改动立即保存，重启后保持': 'Toggles save immediately and persist across restarts',
+  '启动时打开上次的 PSD': 'Reopen the last PSD on startup',
+  '直接进入最后编辑的设计稿；关闭后启动停在项目页':
+    'Jump straight into the design file you were editing; when off, startup stays on the project page',
+  '自动检查更新': 'Check for updates automatically',
+  '启动时静默查询一次 GitHub Releases，仅发现新版本才提示；关闭后可在「关于轻切」手动检查':
+    'Query GitHub Releases once at startup and notify only when a newer version exists; you can still check manually in “About 轻切”',
+  // 画布与测量
+  '画布与测量': 'Canvas & Measuring',
+  '详情页画布的行为，改动立即生效': 'Behaviour of the detail-page canvas; changes apply immediately',
+  '悬停测距': 'Hover measuring',
+  '选择工具下选中图层后，悬停其它图层显示 Figma 式的边缘间距':
+    'With the move tool and a layer selected, hovering another layer shows Figma-style edge gaps',
+  '恢复上次缩放与位置': 'Restore last zoom and position',
+  '重新打开同一份 PSD 时回到上次的画布视口；关闭后每次适配整图':
+    'Reopening the same PSD returns to its last canvas viewport; when off, every open fits the whole artboard',
+  '导出 CSS 的长度单位在「导出设置」里选择。': 'The length unit for exported CSS is chosen under “Export Settings”.',
+  // 存储与缓存上限
+  '缓存上限': 'Cache limit',
+  '不限制': 'Unlimited',
+  '超出上限时，导入新 PSD 后自动删除最久未用的缩略图。缩略图只是列表预览，删掉不影响 PSD 源文件，重新导入即可再生成。':
+    'Above the limit, importing a new PSD drops the least recently used thumbnails. They are only list previews — removing them never touches the PSD files, and re-importing regenerates them.',
+  '已按上限清理 {n} 个缩略图，释放 {size}': 'Trimmed {n} thumbnails to the limit, freed {size}'
 } as Record<string, string>

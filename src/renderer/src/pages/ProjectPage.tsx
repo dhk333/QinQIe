@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Project, ProjectPsd } from '@/types'
 import { genId } from '@/lib/projects'
+import { getUiPrefs } from '@/lib/uiPrefs'
 import { useDialog, useToast } from '@/lib/ui'
 import { useT } from '@/i18n/core'
 import { FolderIcon } from '@/components/icons'
@@ -40,7 +41,8 @@ const StripLayoutIcon = (
 )
 
 async function importPaths(paths: string[]): Promise<{ ok: ProjectPsd[]; failed: string[] }> {
-  const results = (await window.api.importPsds(paths)) as Array<{
+  const cap = getUiPrefs().thumbCapMB
+  const results = (await window.api.importPsds(paths, cap > 0 ? cap * 1024 * 1024 : 0)) as Array<{
     path: string
     name: string
     w: number

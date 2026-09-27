@@ -4,8 +4,7 @@ import AppLogo from '@/components/AppLogo'
 import Slider from '@/components/Slider'
 import ChangelogPage from '@/pages/ChangelogPage'
 import { useDialog, useToast } from '@/lib/ui'
-import { loadExportPrefs, saveExportPrefs, type ExportPrefs } from '@/lib/exportPrefs'
-import { startOnboarding } from '@/lib/onboarding'
+import { DEFAULT_TEMPLATE, loadExportPrefs, saveExportPrefs, type ExportPrefs } from '@/lib/exportPrefs'
 import {
   CUSTOM_ID,
   THEMES,
@@ -15,8 +14,11 @@ import {
   type CustomTheme
 } from '@/lib/themes'
 import { RELEASES } from '@/lib/changelog'
+import { startOnboarding } from '@/lib/onboarding'
 import { FONT_SIZES, type FontSizeId } from '@/lib/uiFont'
 import { useT, getLang, setLang, LANGS } from '@/i18n/core'
+import { setUiPrefs, useUiPrefs } from '@/lib/uiPrefs'
+import type { CssUnit } from '@/lib/cssUnits'
 import {
   DownloadIcon,
   FontIcon,
@@ -25,6 +27,8 @@ import {
   HistoryIcon,
   InfoIcon,
   KeyboardIcon,
+  MoveIcon,
+  OpenIcon,
   PaletteIcon,
   SearchIcon
 } from '@/components/icons'
@@ -45,6 +49,8 @@ type SectionId =
   | 'about'
   | 'shortcuts'
   | 'changelog'
+  | 'startup'
+  | 'canvas'
 
 const NAV: {
   group: string
@@ -59,26 +65,26 @@ const NAV: {
     group: '通用',
     items: [
       { id: 'themes', label: '主题', Icon: PaletteIcon, keywords: '亮色 暗色 明暗 配色 自定义 晴空 墨夜 青瓷 暖沙 绛紫 松墨' },
-      { id: 'language', label: '语言', Icon: GlobeIcon, keywords: 'Language 语言 简体 繁体 English 繁體' },
-      { id: 'storage', label: '存储与缓存', Icon: FolderIcon, keywords: '数据目录 容量 缩略图 清理 隐私 离线' },
-      { id: 'export', label: '导出设置', Icon: DownloadIcon, keywords: '格式 倍数 质量 png jpg webp 默认' }
+      { id: 'language', label: '语言', Icon: GlobeIcon, keywords: 'Language 简体 繁体 English 繁體' },
+      { id: 'fontsize', label: '字体大小', Icon: FontIcon, keywords: '缩放 显示 大小' },
+      { id: 'export', label: '导出设置', Icon: DownloadIcon, keywords: '格式 倍数 质量 png jpg webp 默认 命名 模板' },
+      { id: 'startup', label: '启动与更新', Icon: OpenIcon, keywords: '开机 上次 打开 恢复 检查更新 自动' }
     ]
   },
   {
-    group: '字体',
-    items: [{ id: 'fontsize', label: '字体大小', Icon: FontIcon, keywords: '缩放 显示 大小' }]
-  },
-  {
-    group: '快捷键',
-    items: [{ id: 'shortcuts', label: '快捷键设置', Icon: KeyboardIcon, keywords: '改绑 键位 命令' }]
-  },
-  {
-    group: '更新日志',
-    items: [{ id: 'changelog', label: '更新日志', Icon: HistoryIcon, keywords: '版本 发布' }]
+    group: '效率',
+    items: [
+      { id: 'shortcuts', label: '快捷键', Icon: KeyboardIcon, keywords: '改绑 键位 命令 恢复默认' },
+      { id: 'canvas', label: '画布与测量', Icon: MoveIcon, keywords: '悬停 测距 间距 缩放 位置 视口' }
+    ]
   },
   {
     group: '关于',
-    items: [{ id: 'about', label: '关于轻切', Icon: InfoIcon, keywords: '介绍 项目 版本 新手引导 教程 重放' }]
+    items: [
+      { id: 'storage', label: '存储与缓存', Icon: FolderIcon, keywords: '数据目录 容量 缩略图 清理 隐私 离线' },
+      { id: 'changelog', label: '版本记录', Icon: HistoryIcon, keywords: '更新日志 版本 发布' },
+      { id: 'about', label: '关于轻切', Icon: InfoIcon, keywords: '介绍 项目 版本 新手引导 教程 重放' }
+    ]
   }
 ]
 
@@ -88,6 +94,9 @@ function fmtBytes(n: number): string {
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
+
+/** 缩略图缓存档位（MB），0 = 不限制 */
+const THUMB_CAPS = [0, 128, 256, 512, 1024]
 
 const NEW_THEME_DRAFT: CustomTheme = {
   name: '我的主题',
@@ -120,9 +129,48 @@ function ThemePreview({ bg, panel, accent }: { bg: string; panel: string; accent
   )
 }
 
+/** 关键词是中文原文，非简中界面下不展示；简中下只露前 3 个，长串会压垮 220px 导航 */
+function kwPreview(keywords: string, zh: boolean): string {
+  if (!zh) return ''
+  const words = keywords.split(/\s+/).filter(Boolean)
+  const head = words.slice(0, 3).join(' · ')
+  return words.length > 3 ? `${head} +${words.length - 3}` : head
+}
+
+function Toggle({
+  name,
+  desc,
+  on,
+  onChange
+}: {
+  name: string
+  desc: string
+  on: boolean
+  onChange: (next: boolean) => void
+}) {
+  return (
+    <div className="so-row">
+      <span className="so-main">
+        <span className="so-name">{name}</span>
+        <span className="so-desc">{desc}</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        className={`sw-btn${on ? ' on' : ''}`}
+        onClick={() => onChange(!on)}
+      >
+        <i />
+      </button>
+    </div>
+  )
+}
+
 export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSizeChange }: Props) {
   const t = useT()
   const lang = getLang()
+  const ui = useUiPrefs()
   const [active, setActive] = useState<SectionId>('themes')
   const [pending, setPending] = useState<SectionId | null>(null)
   const swapTimer = useRef<number>(0)
@@ -159,6 +207,15 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
     const freed = await window.api.clearThumbCache()
     setStats(await window.api.dataStats())
     toast(t('已释放 {size}', { size: fmtBytes(freed) }))
+  }
+
+  // 选定档位立刻按新上限裁剪一次，用户当场能看到容量变化
+  const applyThumbCap = async (mb: number) => {
+    setUiPrefs({ thumbCapMB: mb })
+    if (!mb) return
+    const r = await window.api.trimThumbCache(mb * 1024 * 1024)
+    setStats(await window.api.dataStats())
+    if (r.deleted) toast(t('已按上限清理 {n} 个缩略图，释放 {size}', { n: r.deleted, size: fmtBytes(r.freed) }))
   }
 
   const switchTo = (id: SectionId) => {
@@ -255,7 +312,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                     {t(i.label)}
                     {query.trim() && i.keywords && (
                       <small className="overflow-hidden text-ellipsis text-[10px] font-normal whitespace-nowrap text-txt-3">
-                        {i.keywords}
+                        {kwPreview(i.keywords, lang === 'zh-CN')}
                       </small>
                     )}
                   </span>
@@ -413,6 +470,23 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 {t('清理缩略图缓存')}
               </button>
             </div>
+            <div className="mt-[22px] mb-[14px] flex items-center gap-4">
+              <span className="w-20 shrink-0 text-[12px] text-txt-2">{t('缓存上限')}</span>
+              <div className="es-seg">
+                {THUMB_CAPS.map((mb) => (
+                  <button
+                    key={mb}
+                    className={ui.thumbCapMB === mb ? 'on' : ''}
+                    onClick={() => void applyThumbCap(mb)}
+                  >
+                    {mb ? `${mb} MB` : t('不限制')}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="es-note leading-[1.6] text-txt-3">
+              {t('超出上限时，导入新 PSD 后自动删除最久未用的缩略图。缩略图只是列表预览，删掉不影响 PSD 源文件，重新导入即可再生成。')}
+            </p>
           </div>
         )}
         {active === 'export' && (
@@ -458,11 +532,102 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               </div>
             </div>
             {prefs.format === 'png' && <p className="es-note leading-[1.6] text-txt-3">{t('PNG 为无损格式，质量设置仅在 JPG / WebP 时生效')}</p>}
+            <div className="mt-[18px] mb-[14px] flex items-center gap-4">
+              <span className="w-16 shrink-0 text-[12px] text-txt-2">{t('命名模板')}</span>
+              <input
+                className="so-input so-tpl"
+                value={prefs.template}
+                spellCheck={false}
+                placeholder={DEFAULT_TEMPLATE}
+                onChange={(e) => setPref({ template: e.target.value })}
+                onBlur={(e) => {
+                  if (!e.target.value.trim()) setPref({ template: DEFAULT_TEMPLATE })
+                }}
+              />
+            </div>
+            <p className="es-note leading-[1.6] text-txt-3">
+              {t('变量：{名称} 图层或切片名 · {倍数} @2x 中的 2 · {格式} png / jpg / webp · {序号} 批量内递增')}
+            </p>
+            <div className="mt-[18px] mb-[14px] flex items-center gap-4">
+              <span className="w-16 shrink-0 text-[12px] text-txt-2">{t('CSS 单位')}</span>
+              <div className="es-seg">
+                {(['px', 'rem', 'vw'] as CssUnit[]).map((u) => (
+                  <button
+                    key={u}
+                    className={ui.cssUnits.unit === u ? 'on' : ''}
+                    onClick={() => setUiPrefs({ cssUnits: { ...ui.cssUnits, unit: u } })}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+              {ui.cssUnits.unit !== 'px' && (
+                <label className="flex items-center gap-2 text-[12px] text-txt-2">
+                  {ui.cssUnits.unit === 'rem' ? t('基准 px') : t('画布宽 px')}
+                  <input
+                    className="so-input so-num"
+                    type="number"
+                    min={1}
+                    value={ui.cssUnits.unit === 'rem' ? ui.cssUnits.remBase : ui.cssUnits.vwBase}
+                    onChange={(e) =>
+                      setUiPrefs({
+                        cssUnits:
+                          ui.cssUnits.unit === 'rem'
+                            ? { ...ui.cssUnits, remBase: Number(e.target.value) }
+                            : { ...ui.cssUnits, vwBase: Number(e.target.value) }
+                      })
+                    }
+                  />
+                </label>
+              )}
+            </div>
+            <p className="es-note leading-[1.6] text-txt-3">
+              {t('详情页属性面板导出的 CSS 代码按此单位换算；vw 默认按当前画布宽度换算，画布未知时用上面的基准值')}
+            </p>
+          </div>
+        )}
+        {active === 'startup' && (
+          <div className="set-sec">
+            <h4>{t('启动与更新')}</h4>
+            <p className="m-0 mb-[10px] text-[12px] leading-[1.6] text-txt-3">{t('开关改动立即保存，重启后保持')}</p>
+            <Toggle
+              name={t('启动时打开上次的 PSD')}
+              desc={t('直接进入最后编辑的设计稿；关闭后启动停在项目页')}
+              on={ui.lastPsdOnStartup}
+              onChange={(v) => setUiPrefs({ lastPsdOnStartup: v })}
+            />
+            <Toggle
+              name={t('自动检查更新')}
+              desc={t('启动时静默查询一次 GitHub Releases，仅发现新版本才提示；关闭后可在「关于轻切」手动检查')}
+              on={ui.autoUpdateCheck}
+              onChange={(v) => setUiPrefs({ autoUpdateCheck: v })}
+            />
+          </div>
+        )}
+        {active === 'canvas' && (
+          <div className="set-sec">
+            <h4>{t('画布与测量')}</h4>
+            <p className="m-0 mb-[10px] text-[12px] leading-[1.6] text-txt-3">{t('详情页画布的行为，改动立即生效')}</p>
+            <Toggle
+              name={t('悬停测距')}
+              desc={t('选择工具下选中图层后，悬停其它图层显示 Figma 式的边缘间距')}
+              on={ui.hoverMeasure}
+              onChange={(v) => setUiPrefs({ hoverMeasure: v })}
+            />
+            <Toggle
+              name={t('恢复上次缩放与位置')}
+              desc={t('重新打开同一份 PSD 时回到上次的画布视口；关闭后每次适配整图')}
+              on={ui.restoreViewport}
+              onChange={(v) => setUiPrefs({ restoreViewport: v })}
+            />
+            <p className="es-note mt-3 leading-[1.6] text-txt-3">
+              {t('导出 CSS 的长度单位在「导出设置」里选择。')}
+            </p>
           </div>
         )}
         {active === 'language' && (
           <div className="set-sec">
-            <h4>{t('界面语言')}</h4>
+            <h4>{t('语言')}</h4>
             <p className="m-0 mb-[18px] text-[12px] leading-[1.6] text-txt-3">{t('切换后立即生效，重启后保持')}</p>
             <div className="flex flex-col gap-[10px]">
               {LANGS.map((l) => (
@@ -548,9 +713,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
                 <DownloadIcon className="h-3.5 w-3.5" />
                 {checking ? t('检查中…') : t('检查更新')}
               </button>
-              <button className="btn btn-secondary" onClick={startOnboarding}>
-                {t('重放新手引导')}
-              </button>
+              <button className="btn btn-secondary" onClick={startOnboarding}>{t('重放新手引导')}</button>
             </div>
             <p className="m-0 mt-[14px] max-w-[660px] select-text text-[11.5px] leading-[1.9] text-txt-3">
               {t('数据与缓存管理见「设置 → 通用 → 存储与缓存」；全部处理发生在本机，不联网、不上传。')}
@@ -560,7 +723,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
         {active === 'changelog' && <ChangelogPage />}
         {active === 'shortcuts' && (
           <div className="set-sec set-sec-wide">
-            <h4>{t('快捷键设置')}</h4>
+            <h4>{t('快捷键')}</h4>
             <p className="m-0 mb-[18px] text-[12px] leading-[1.6] text-txt-3">
               {t('点击键帽后按下新组合即可改绑，自动提示冲突；单条 ↺ 恢复，或全部恢复默认。自定义仅保存在本机。')}
             </p>

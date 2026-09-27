@@ -1,6 +1,8 @@
 import type { ExportFormat, PsdLayer } from '@/types'
 import type { RNode } from './compositor'
 import { t } from '@/i18n/core'
+import { cssUnitBase, fmtLen, type CssUnitsPrefs } from './cssUnits'
+import { getUiPrefs } from './uiPrefs'
 
 function canvasToBlob(canvas: HTMLCanvasElement, format: ExportFormat, quality?: number): Promise<Blob | null> {
   return new Promise((resolve) => {
@@ -131,16 +133,30 @@ export function layerEffectNames(rnode?: RNode): string[] {
   return names.map((n) => t(n))
 }
 
-export function layerCssSnippet(layer: PsdLayer, color: string | null, rnode?: RNode): string {
+export function layerCssSnippet(
+  layer: PsdLayer,
+  color: string | null,
+  rnode?: RNode,
+  units: CssUnitsPrefs = getUiPrefs().cssUnits,
+  docWidth?: number | null
+): string {
+  const len = (px: number) => fmtLen(px, units, docWidth)
   const lines: string[] = []
   const kind = layer.type === 'group' ? '图层组' : layer.isText ? '文本图层' : '像素图层'
   const tags = [kind, layer.hidden ? '已隐藏' : null, layer.clipping ? '剪贴蒙版' : null].filter(Boolean)
   lines.push(`/* ${layer.name} · ${tags.join(' · ')} */`)
+  // 非 px 单位时留一行 PSD 原始像素值，方便回查与换算核对
+  if (units.unit !== 'px') {
+    const base = cssUnitBase(units, docWidth)
+    lines.push(
+      `/* 单位 ${units.unit} · 基准 ${base}px · PSD 原值 X ${layer.left} Y ${layer.top} ${layer.width}×${layer.height} */`
+    )
+  }
   lines.push('position: absolute;')
-  lines.push(`left: ${layer.left}px;`)
-  lines.push(`top: ${layer.top}px;`)
-  lines.push(`width: ${layer.width}px;`)
-  lines.push(`height: ${layer.height}px;`)
+  lines.push(`left: ${len(layer.left)};`)
+  lines.push(`top: ${len(layer.top)};`)
+  lines.push(`width: ${len(layer.width)};`)
+  lines.push(`height: ${len(layer.height)};`)
   if (layer.opacity < 0.999) lines.push(`opacity: ${Math.round(layer.opacity * 1000) / 1000};`)
   const cssBlend = BLEND_CSS[layer.blendMode]
   if (cssBlend) lines.push(`mix-blend-mode: ${cssBlend};`)
@@ -152,7 +168,7 @@ export function layerCssSnippet(layer: PsdLayer, color: string | null, rnode?: R
 
   if (layer.isText && layer.textInfo) {
     const ti = layer.textInfo
-    if (ti.fontSize) lines.push(`font-size: ${ti.fontSize}px;`)
+    if (ti.fontSize) lines.push(`font-size: ${len(ti.fontSize)};`)
     if (ti.fontFamily) {
       const fam = ti.fontFamily.replace(/-(Bold|Light|Regular|Medium|Thin|Black|Heavy)$/i, '')
       lines.push(`font-family: '${fam}', sans-serif;`)
@@ -160,7 +176,7 @@ export function layerCssSnippet(layer: PsdLayer, color: string | null, rnode?: R
     if (ti.fontWeight === 'bold') lines.push('font-weight: 700;')
     if (ti.color) lines.push(`color: ${ti.color};`)
     if (ti.leading && ti.fontSize && Math.abs(ti.leading - ti.fontSize) > 0.5)
-      lines.push(`line-height: ${n1(ti.leading)}px;`)
+      lines.push(`line-height: ${len(ti.leading)};`)
     if (ti.tracking)
       lines.push(`letter-spacing: ${Math.round((ti.tracking / 1000) * 1000) / 1000}em;`)
   } else if (color) {
@@ -170,33 +186,33 @@ export function layerCssSnippet(layer: PsdLayer, color: string | null, rnode?: R
   const fx = rnode?.effects
   if (fx) {
     const filters: string[] = []
-    for (const s of fx.dropShadow ?? [])
-      if (s.enabled) {
-        const rad = (s.angle * Math.PI) / 180
+    for (const sh of fx.dropShadow ?? [])
+      if (sh.enabled) {
+        const rad = (sh.angle * Math.PI) / 180
         filters.push(
-          `drop-shadow(${n1(-s.distance * Math.cos(rad))}px ${n1(s.distance * Math.sin(rad))}px ${n1(s.size)}px ${fxColor(s.color, s.opacity)})`
+          `drop-shadow(${len(-sh.distance * Math.cos(rad))} ${len(sh.distance * Math.sin(rad))} ${len(sh.size)} ${fxColor(sh.color, sh.opacity)})`
         )
       }
     if (fx.outerGlow?.enabled)
-      filters.push(`drop-shadow(0 0 ${n1(fx.outerGlow.size)}px ${fxColor(fx.outerGlow.color, fx.outerGlow.opacity)})`)
+      filters.push(`drop-shadow(0 0 ${len(fx.outerGlow.size)} ${fxColor(fx.outerGlow.color, fx.outerGlow.opacity)})`)
     if (filters.length) lines.push(`filter: ${filters.join(', ')};`)
 
     const shadows: string[] = []
-    for (const s of fx.innerShadow ?? [])
-      if (s.enabled) {
-        const rad = (s.angle * Math.PI) / 180
+    for (const sh of fx.innerShadow ?? [])
+      if (sh.enabled) {
+        const rad = (sh.angle * Math.PI) / 180
         shadows.push(
-          `inset ${n1(-s.distance * Math.cos(rad))}px ${n1(s.distance * Math.sin(rad))}px ${n1(s.size)}px ${fxColor(s.color, s.opacity)}`
+          `inset ${len(-sh.distance * Math.cos(rad))} ${len(sh.distance * Math.sin(rad))} ${len(sh.size)} ${fxColor(sh.color, sh.opacity)}`
         )
       }
     if (fx.innerGlow?.enabled)
-      shadows.push(`inset 0 0 ${n1(fx.innerGlow.size)}px ${fxColor(fx.innerGlow.color, fx.innerGlow.opacity)}`)
+      shadows.push(`inset 0 0 ${len(fx.innerGlow.size)} ${fxColor(fx.innerGlow.color, fx.innerGlow.opacity)}`)
     if (shadows.length) lines.push(`box-shadow: ${shadows.join(', ')}; /* 内阴影/内发光（矩形近似） */`)
 
     for (const st of fx.stroke ?? [])
       if (st.enabled)
         lines.push(
-          `border: ${n1(st.size)}px solid ${fxColor(st.color, st.opacity)}; /* 描边 ${st.position === 'inside' ? '内侧' : st.position === 'center' ? '居中' : '外侧'} */`
+          `border: ${len(st.size)} solid ${fxColor(st.color, st.opacity)}; /* 描边 ${st.position === 'inside' ? '内侧' : st.position === 'center' ? '居中' : '外侧'} */`
         )
     for (const sf of fx.solidFill ?? [])
       if (sf.enabled) {
@@ -206,7 +222,7 @@ export function layerCssSnippet(layer: PsdLayer, color: string | null, rnode?: R
     for (const g of fx.gradientOverlay ?? [])
       if (g.enabled && g.stops.length) {
         const stops = (g.reverse ? [...g.stops].reverse() : g.stops)
-          .map((s) => `${fxColor(s.color, g.opacity)} ${Math.round(s.location * 100)}%`)
+          .map((x) => `${fxColor(x.color, g.opacity)} ${Math.round(x.location * 100)}%`)
           .join(', ')
         lines.push(`background-image: linear-gradient(${n1(((90 - g.angle) % 360 + 360) % 360)}deg, ${stops}); /* 渐变叠加（近似） */`)
       }

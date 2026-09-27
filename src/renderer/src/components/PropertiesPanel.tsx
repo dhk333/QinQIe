@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import type { ExportFormat, PsdDoc, PsdLayer } from '@/types'
 import { blendLabel, layerCssSnippet, layerEffectNames, sampleColor } from '@/lib/export'
 import { loadExportPrefs } from '@/lib/exportPrefs'
+import type { CssUnit } from '@/lib/cssUnits'
+import { setUiPrefs, useUiPrefs } from '@/lib/uiPrefs'
 import { indexRNodes, renderLayerCanvas } from '@/lib/psd'
 import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
@@ -158,6 +160,8 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
   const [scale, setScale] = useState(() => loadExportPrefs().scales[0])
   const [quality, setQuality] = useState(() => loadExportPrefs().quality)
   const [copied, setCopied] = useState<'css' | 'color' | 'text' | null>(null)
+  const uiPrefs = useUiPrefs()
+  const cssUnits = uiPrefs.cssUnits
   const [exportOpen, setExportOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewSeen, setPreviewSeen] = useState(false)
@@ -172,10 +176,11 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
     [layer, canvasMap]
   )
   const css = useMemo(
-    () => (layer ? layerCssSnippet(layer, color, rnode) : ''),
+    () => (layer ? layerCssSnippet(layer, color, rnode, cssUnits, doc?.width) : ''),
     // getLang(): CSS 注释内嵌展示标签，语言切换后需重新生成
-    [layer, color, rnode, getLang()]
+    [layer, color, rnode, cssUnits, doc?.width, getLang()]
   )
+  const setCssUnit = (unit: CssUnit) => setUiPrefs({ cssUnits: { ...cssUnits, unit } })
   const previewUrl = useMemo(() => {
     // 合成整层位图代价高：用户从未展开过预览就完全不跑
     if (!previewSeen || !layer || !doc) return null
@@ -311,6 +316,20 @@ export default function PropertiesPanel({ layer, doc, rnodes, canvasMap, hiddenI
       )}
 
       <Section title="CSS">
+        <div className="mb-2 flex items-center gap-1.5">
+          {(['px', 'rem', 'vw'] as CssUnit[]).map((u) => (
+            <button key={u} onClick={() => setCssUnit(u)} className={optCls(cssUnits.unit === u)}>
+              {u}
+            </button>
+          ))}
+          {cssUnits.unit !== 'px' && (
+            <span className="ml-auto font-mono text-[10.5px] text-txt-3">
+              {cssUnits.unit === 'rem'
+                ? `1rem = ${cssUnits.remBase}px`
+                : `100vw = ${doc?.width ?? cssUnits.vwBase}px`}
+            </span>
+          )}
+        </div>
         <div className="relative rounded-lg border border-border bg-panel-2">
           <button
             className="icon-btn absolute right-1.5 top-1.5"

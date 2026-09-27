@@ -969,6 +969,31 @@ body.dark .css-hl .ts { color: #82aaff; }
 .es-q .ui-slider { flex: 1; }
 .es-q b { font-size: 11.5px; color: var(--txt-2); font-family: Consolas, monospace; width: 34px; }
 .es-note { margin: 2px 0 0; font-size: 11px; }
+
+/* 设置项通用行：左标题 + 说明，右控件 */
+.so-row { display: flex; align-items: center; gap: 16px; padding: 9px 0; }
+.so-main { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.so-name { font-size: 12.5px; color: var(--txt); }
+.so-desc { font-size: 11px; line-height: 1.5; color: var(--txt-3); }
+.so-input {
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel-2);
+  color: var(--txt); font-family: Consolas, monospace; font-size: 12px; padding: 6px 10px;
+  outline: none; transition: border-color 0.15s;
+}
+.so-input:focus { border-color: var(--accent); }
+.so-num { width: 78px; }
+.so-tpl { flex: 1; min-width: 0; max-width: 260px; }
+.sw-btn {
+  position: relative; width: 34px; height: 20px; flex-shrink: 0; cursor: pointer;
+  border: 1px solid var(--line-2); border-radius: 999px; background: var(--panel-3);
+  transition: background 0.15s, border-color 0.15s;
+}
+.sw-btn i {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--txt-3); transition: transform 0.16s var(--ease), background 0.15s;
+}
+.sw-btn.on { border-color: var(--accent); background: var(--accent-dim); }
+.sw-btn.on i { transform: translateX(14px); background: var(--accent); }
 /* 存储与缓存 */
 .st-kv { margin-bottom: 18px; }
 .st-kv dd { font-family: Consolas, monospace; font-size: 11.5px; }

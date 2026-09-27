@@ -3,6 +3,7 @@ import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
 import { buildCompositeCanvas, flattenLayers } from '@/lib/psd'
 import { useT } from '@/i18n/core'
+import { useUiPrefs } from '@/lib/uiPrefs'
 
 export type CanvasTool = 'move' | 'slice' | 'picker' | 'hand'
 
@@ -25,6 +26,9 @@ interface Props {
   onLayerContext?: (layer: PsdLayer, x: number, y: number) => void
   apiRef?: React.MutableRefObject<CanvasViewApi | null>
   onZoomChange?: (pct: number) => void
+  /** 首帧打开时的视口（恢复上次缩放/位置）；缺省时自动适配整图 */
+  initialView?: CanvasViewport | null
+  onViewChange?: (v: CanvasViewport) => void
   tool: CanvasTool
   slices: DocSlice[]
   selectedSliceIds: Set<string>
@@ -66,6 +70,13 @@ interface DrawRect {
   y: number
   w: number
   h: number
+}
+
+/** 画布视口：缩放倍率 + 文档原点在屏幕上的位置 */
+export interface CanvasViewport {
+  zoom: number
+  x: number
+  y: number
 }
 
 function makeCheckerPattern(ctx: CanvasRenderingContext2D): CanvasPattern {
@@ -150,9 +161,12 @@ export default function CanvasView({
   onDupSlice,
   onPickColor,
   onUpdateSlice,
-  onDeleteSlice
+  onDeleteSlice,
+  initialView,
+  onViewChange
 }: Props) {
   const t = useT()
+  const uiPrefs = useUiPrefs()
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
@@ -187,9 +201,13 @@ export default function CanvasView({
   useEffect(() => {
     if (doc && doc.fileName !== lastFitDoc.current && size.w > 0) {
       lastFitDoc.current = doc.fileName
-      fit()
+      // 上次视口只在本文档首次可见时生效一次，之后交给缩放/平移
+      if (initialView) {
+        setZoom(Math.max(0.02, Math.min(32, initialView.zoom)))
+        setOffset({ x: initialView.x, y: initialView.y })
+      } else fit()
     }
-  }, [doc, size.w, fit])
+  }, [doc, size.w, fit, initialView])
 
   const applyZoom = useCallback(
     (target: number) => {
@@ -244,6 +262,11 @@ export default function CanvasView({
   useEffect(() => {
     onZoomChange?.(Math.round(zoom * 100))
   }, [zoom, onZoomChange])
+
+  // 首次带 doc 的通知仍是适配前的默认视口，由调用方丢弃后再记录真实视口
+  useEffect(() => {
+    if (doc) onViewChange?.({ zoom, x: offset.x, y: offset.y })
+  }, [doc, zoom, offset, onViewChange])
 
   useImperativeHandle(apiRef, () => ({ fit, applyZoom, zoomTo, getZoom: () => zoom }), [fit, applyZoom, zoomTo, zoom])
 
@@ -311,7 +334,7 @@ export default function CanvasView({
     }
 
     // Figma 式间距：选中图层包围盒 ↔ 悬停图层，边到边的水平/垂直间隙
-    if (tool === 'move' && selectedIds.size > 0 && hoverId !== null && !selectedIds.has(hoverId)) {
+    if (uiPrefs.hoverMeasure && tool === 'move' && selectedIds.size > 0 && hoverId !== null && !selectedIds.has(hoverId)) {
       const layers = flattenLayers(tree)
       const hov = layers.find((l) => l.id === hoverId)
       const sel = layers.filter((l) => selectedIds.has(l.id))
@@ -469,7 +492,7 @@ export default function CanvasView({
         ctx.setLineDash([])
       }
     }
-  }, [doc, tree, rnodes, canvasMap, hiddenIds, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId])
+  }, [doc, tree, rnodes, canvasMap, hiddenIds, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId, uiPrefs])
 
   // 滚轮缩放
   useEffect(() => {

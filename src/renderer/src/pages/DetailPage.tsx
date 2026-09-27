@@ -10,11 +10,17 @@ import {
 } from '@/lib/psd'
 import { exportCanvasBytes } from '@/lib/export'
 import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
+import { getUiPrefs } from '@/lib/uiPrefs'
+import { loadView, saveLastRoute, saveView } from '@/lib/session'
 import { matchCommand, effectiveDisplay, COMMAND_MAP } from '@shared/keymap'
 import { useDialog, useToast } from '@/lib/ui'
 import { useT } from '@/i18n/core'
 import LayerTree, { type LayerTreeApi } from '@/components/LayerTree'
-import CanvasView, { type CanvasTool, type CanvasViewApi } from '@/components/CanvasView'
+import CanvasView, {
+  type CanvasTool,
+  type CanvasViewApi,
+  type CanvasViewport
+} from '@/components/CanvasView'
 import ContextMenu from '@/components/ContextMenu'
 import Slider from '@/components/Slider'
 import AppLogo from '@/components/AppLogo'
@@ -133,8 +139,28 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   }, [exitArmed])
   const canvasApiRef = useRef<CanvasViewApi | null>(null)
   const [zoomPct, setZoomPct] = useState(100)
+  // 重开同一份 PSD 时回到上次的缩放与位置；关闭开关则一律适配整图
+  const initialView = useMemo(
+    () => (getUiPrefs().restoreViewport ? loadView(psd.path) : null),
+    [psd.path]
+  )
+  const rawViewRef = useRef(false)
+  const handleViewChange = useCallback(
+    (v: CanvasViewport) => {
+      // 首个通知是适配前的默认视口，丢掉再记录真实视口
+      if (!rawViewRef.current) {
+        rawViewRef.current = true
+        return
+      }
+      saveView(psd.path, v)
+    },
+    [psd.path]
+  )
+  useEffect(() => {
+    saveLastRoute(project.id, psd.id)
+  }, [project.id, psd.id])
   const [pctMenuOpen, setPctMenuOpen] = useState(false)
-  const [template, setTemplate] = useState('{名称}@{倍数}x.{格式}')
+  const [template, setTemplate] = useState(() => loadExportPrefs().template)
   const [tool, setTool] = useState<CanvasTool>('move')
   const [slices, setSlicesRaw] = useState<DocSlice[]>(() => psd.slices ?? [])
   const [selectedSliceIds, setSelectedSliceIds] = useState<Set<string>>(new Set())
@@ -153,7 +179,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const [batchQuality, setBatchQuality] = useState(() => loadExportPrefs().quality)
   useEffect(() => {
     if (batchScales.size)
-      saveExportPrefs({ format: batchFmt, scales: [...batchScales].sort((a, b) => a - b), quality: batchQuality })
+      saveExportPrefs({ ...loadExportPrefs(), format: batchFmt, scales: [...batchScales].sort((a, b) => a - b), quality: batchQuality })
   }, [batchFmt, batchScales, batchQuality])
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const cancelRef = useRef(false)
@@ -550,6 +576,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     })
     if (!input || typeof input !== 'string') return
     setTemplate(input)
+    saveExportPrefs({ ...loadExportPrefs(), template: input })
     toast(t('命名模板已更新'))
   }
 
@@ -960,6 +987,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           onLayerContext={handleLayerContext}
           apiRef={canvasApiRef}
           onZoomChange={setZoomPct}
+          initialView={initialView}
+          onViewChange={handleViewChange}
           tool={tool}
           slices={slices}
           selectedSliceIds={selectedSliceIds}
@@ -979,7 +1008,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           }}
         />
 
-        <div className="batch-bar">
+        <div className="batch-bar" id="batch-bar">
           {tool === 'slice' ? (
             <>
               <span className="batch-label">
@@ -1126,7 +1155,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           </button>
         </div>
 
-        <div className="zoombar">
+        <div className="zoombar" id="zoom-bar">
           <span
             className={`zb${tool === 'move' ? ' active' : ''}`}
             title={t('移动 / 选择图层 (V)')}

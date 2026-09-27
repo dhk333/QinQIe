@@ -160,6 +160,44 @@ ipcMain.handle('app:clear-thumb-cache', async (): Promise<number> => {
   return freed
 })
 
+// 缩略图缓存限量：按最后使用时间从新到旧保留，超出额度的整文件删除。
+// maxBytes<=0 表示不限制。
+async function trimThumbCache(maxBytes: number): Promise<{ deleted: number; freed: number }> {
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) return { deleted: 0, freed: 0 }
+  const thumbDir = join(app.getPath('userData'), 'thumbnails')
+  const files: { path: string; size: number; used: number }[] = []
+  try {
+    for (const name of await readdir(thumbDir)) {
+      if (!name.endsWith('.png')) continue
+      const p = join(thumbDir, name)
+      const st = await stat(p)
+      files.push({ path: p, size: st.size, used: Math.max(st.mtimeMs, st.atimeMs) })
+    }
+  } catch {
+    return { deleted: 0, freed: 0 }
+  }
+  files.sort((a, b) => b.used - a.used)
+  let keep = 0
+  let deleted = 0
+  let freed = 0
+  for (const f of files) {
+    if (keep + f.size <= maxBytes) {
+      keep += f.size
+      continue
+    }
+    try {
+      await rm(f.path, { force: true })
+      deleted++
+      freed += f.size
+    } catch {
+      // 文件被占用时跳过，下次再清
+    }
+  }
+  return { deleted, freed }
+}
+
+ipcMain.handle('app:trim-thumb-cache', (_e, maxBytes: number) => trimThumbCache(maxBytes))
+
 // ========== 更新检查（GitHub Releases，无后端；失败一律静默） ==========
 function cmpVer(a: string, b: string): number {
   const pa = a.split('.').map(Number)
@@ -248,7 +286,7 @@ interface ImportResult {
 }
 
 // 导入 PSD：只读合成图生成缩略图并缓存（不解析图层，列表页秒开）
-ipcMain.handle('psd:import', async (_e, paths: string[]): Promise<ImportResult[]> => {
+ipcMain.handle('psd:import', async (_e, paths: string[], maxThumbBytes?: number): Promise<ImportResult[]> => {
   const results: ImportResult[] = []
   const thumbDir = join(app.getPath('userData'), 'thumbnails')
   for (const filePath of paths) {
@@ -338,6 +376,8 @@ ipcMain.handle('psd:import', async (_e, paths: string[]): Promise<ImportResult[]
       })
     }
   }
+  // 新生成的缩略图已写入，此时封顶删掉的是更久没用的旧缓存
+  await trimThumbCache(Number(maxThumbBytes))
   return results
 })
 

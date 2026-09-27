@@ -4,11 +4,14 @@ export interface ExportPrefs {
   format: ExportFormat
   scales: number[]
   quality: number
+  /** 导出文件名模板，变量：{名称} {倍数} {格式} {序号} */
+  template: string
 }
 
 const KEY = 'qingqie.export-prefs'
 const FORMATS: ExportFormat[] = ['png', 'jpeg', 'webp']
-const DEFAULTS: ExportPrefs = { format: 'png', scales: [2], quality: 0.92 }
+export const DEFAULT_TEMPLATE = '{名称}@{倍数}x.{格式}'
+const DEFAULTS: ExportPrefs = { format: 'png', scales: [2], quality: 0.92, template: DEFAULT_TEMPLATE }
 
 export function loadExportPrefs(): ExportPrefs {
   try {
@@ -21,9 +24,11 @@ export function loadExportPrefs(): ExportPrefs {
       p.scales.every((s) => [1, 2, 3].includes(s)) &&
       typeof p.quality === 'number' &&
       p.quality > 0 &&
-      p.quality <= 1
+      p.quality <= 1 &&
+      typeof p.template === 'string' &&
+      p.template.trim().length > 0
     )
-      return p
+      return { ...DEFAULTS, ...p }
   } catch {
     // 无存储或损坏时用默认
   }

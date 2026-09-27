@@ -5,6 +5,8 @@ import { useDialog, useToast } from '@/lib/ui'
 import { useHashRoute, navigate } from '@/lib/router'
 import { applyTheme, loadTheme } from '@/lib/themes'
 import { applyFontSize, loadFontSize, type FontSizeId } from '@/lib/uiFont'
+import { getUiPrefs } from '@/lib/uiPrefs'
+import { loadLastRoute } from '@/lib/session'
 import { onboardingSeen, startOnboarding } from '@/lib/onboarding'
 import HomePage from '@/pages/HomePage'
 import ProjectPage from '@/pages/ProjectPage'
@@ -31,8 +33,10 @@ export default function App() {
   const dialog = useDialog()
   const toast = useToast()
   const uploadRef = useRef<(() => void) | null>(null)
+  const startupDone = useRef(false)
 
   useEffect(() => {
+    if (!getUiPrefs().autoUpdateCheck) return
     let alive = true
     window.api.checkUpdate().then((u) => {
       if (!alive) return
@@ -62,6 +66,22 @@ export default function App() {
   useEffect(() => {
     loadProjectsData().then(setProjects)
   }, [])
+
+  // 启动收尾：缓存封顶 + 回到上次编辑的 PSD（只跑一次，避免打断用户手动导航）
+  useEffect(() => {
+    if (!projects || startupDone.current) return
+    startupDone.current = true
+    const prefs = getUiPrefs()
+    if (prefs.thumbCapMB) void window.api.trimThumbCache(prefs.thumbCapMB * 1024 * 1024)
+    // 首次启动要先看新手引导，恢复顺延到下次
+    if (!prefs.lastPsdOnStartup || !onboardingSeen()) return
+    if (location.hash && location.hash !== '#/home') return
+    const last = loadLastRoute()
+    if (!last) return
+    const project = projects.find((p) => p.id === last.projectId)
+    if (!project?.psds.some((s) => s.id === last.psdId)) return
+    navigate(`#/detail/${project.id}/${last.psdId}`)
+  }, [projects])
 
   useEffect(() => {
     if (projects && !onboardingSeen()) startOnboarding()
