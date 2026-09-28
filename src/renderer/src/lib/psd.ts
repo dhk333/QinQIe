@@ -1,7 +1,7 @@
 import { readPsd, type Layer, type Psd } from 'ag-psd'
 import type { PsdDoc, PsdLayer } from '@/types'
 import { compositeDocument, renderIsolated, type Env, type RNode } from './compositor'
-import { toRNodes, type LayerBitmap } from './psdDecode'
+import { toRNodes, type LayerBitmap, type PixelEntry } from './psdDecode'
 
 export type { LayerBitmap } from './psdDecode'
 export { decodeLayerCanvases } from './psdDecode'
@@ -314,62 +314,61 @@ function computeLayerContent(img: LayerBitmap): LayerContent | null {
 }
 
 /**
- * Worker 回传的 ImageBitmap 只能当临时载体：实测其解码缓存会在数秒内被丢弃，
- * 位图变成全透明但 width/height 不变。收到后立刻逐张拷成 DOM canvas 作为长期
- * 像素存储（同一实例只拷一次，保持 rnode 与 canvasMap 的引用一致）。
- * 每张位图先收齐全部引用槽位，拷完立即 close：大文档像素总量可达 GB 级，
- * 若像旧实现那样全部拷完再统一 close，bitmap+canvas 两份像素会同时存在，峰值翻倍直接把渲染进程压崩。
- * 拷贝按像素量分帧：整段同步拷会在解码完成瞬间冻结主线程数百毫秒到数秒，
- * 每拷约 8M 像素（32MB）让出主线程一拍，总耗时不变但入场动画不再被卡住；
- * isDead 返回 true 时提前放弃（页面已离开，剩余位图交给 GC）。
+ * Worker 回传的原始像素 → DOM canvas。带渲染上下文的 OffscreenCanvas 不可
+ * transfer/clone，而 ImageBitmap 的解码缓存实测数秒内会被丢弃（位图变全透明但
+ * width/height 不变）——所以 Worker 直接读出原始字节，这里逐条 putImageData 固化。
+ * 原始字节是惰性数据，分帧让出无论多久都不会拷出透明层；每约 4M 像素（16MB）
+ * 让出主线程一拍，解码完成瞬间不再冻结。isDead 时中止并返回 null（页面已离开）。
  */
-export async function materializeBitmaps(
+export async function materializePixels(
   rnodes: RNode[],
-  canvasMap: Map<number, LayerBitmap>,
+  canvasEntries: [number, PixelEntry][],
+  maskEntries: [number, PixelEntry][],
   isDead?: () => boolean
-): Promise<void> {
-  const slots = new Map<ImageBitmap, ((c: HTMLCanvasElement) => void)[]>()
-  const add = (b: ImageBitmap, set: (c: HTMLCanvasElement) => void): void => {
-    const list = slots.get(b)
-    if (list) list.push(set)
-    else slots.set(b, [set])
+): Promise<Map<number, LayerBitmap> | null> {
+  const CHUNK_PIXELS = 1 << 22
+  let chunk = 0
+  const toCanvas = (e: PixelEntry): HTMLCanvasElement => {
+    const c = document.createElement('canvas')
+    c.width = e.w
+    c.height = e.h
+    const ctx = c.getContext('2d')!
+    // 原始字节直写：与旧 ImageBitmap drawImage 逐像素等价，且无插值/衰减变量
+    const img = ctx.createImageData(e.w, e.h)
+    img.data.set(e.data)
+    ctx.putImageData(img, 0, 0)
+    return c
   }
+  const canvasMap = new Map<number, LayerBitmap>()
+  const maskMap = new Map<number, LayerBitmap>()
+  const build = async (
+    entries: [number, PixelEntry][],
+    into: Map<number, LayerBitmap>
+  ): Promise<boolean> => {
+    for (const [id, e] of entries) {
+      if (isDead?.()) return false
+      into.set(id, toCanvas(e))
+      chunk += e.w * e.h
+      if (chunk >= CHUNK_PIXELS) {
+        chunk = 0
+        await new Promise((r) => setTimeout(r, 0))
+      }
+    }
+    return true
+  }
+  if (!(await build(canvasEntries, canvasMap))) return null
+  if (!(await build(maskEntries, maskMap))) return null
+  // Worker 侧回传的 rnodes 已把画布引用清空，这里按 id 回填，
+  // 保持 rnode 与 canvasMap 引用同一实例的策略不变
   const walk = (ns: RNode[]): void => {
     for (const n of ns) {
-      if (n.canvas instanceof ImageBitmap) {
-        const b = n.canvas
-        add(b, (c) => (n.canvas = c))
-      }
-      const mb = n.mask?.canvas
-      if (mb instanceof ImageBitmap) {
-        const m = n.mask!
-        add(mb, (c) => (m.canvas = c))
-      }
+      if (canvasMap.has(n.id)) n.canvas = canvasMap.get(n.id) ?? null
+      if (n.mask && maskMap.has(n.id)) n.mask.canvas = maskMap.get(n.id) ?? null
       if (n.children) walk(n.children)
     }
   }
   walk(rnodes)
-  for (const [id, b] of canvasMap) {
-    if (b instanceof ImageBitmap) add(b, (c) => void canvasMap.set(id, c))
-  }
-  const CHUNK_PIXELS = 1 << 23
-  let chunk = 0
-  for (const [b, sets] of slots) {
-    if (isDead?.()) return
-    const w = b.width
-    const h = b.height
-    const c = document.createElement('canvas')
-    c.width = w
-    c.height = h
-    c.getContext('2d')?.drawImage(b, 0, 0)
-    for (const set of sets) set(c)
-    b.close()
-    chunk += w * h
-    if (chunk >= CHUNK_PIXELS) {
-      chunk = 0
-      await new Promise((r) => setTimeout(r, 0))
-    }
-  }
+  return canvasMap
 }
 
 /**

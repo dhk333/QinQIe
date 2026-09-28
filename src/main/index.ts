@@ -218,6 +218,15 @@ function createWindow(): void {
     }, 3000)
   })
 
+  // dev：渲染层 console 的 warn/error 透传到主进程 stdout，排查偶发白屏/崩溃时有据可查
+  if (process.env.ELECTRON_RENDERER_URL) {
+    mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+      if (level >= 2) {
+        console.log(`[renderer:${level === 3 ? 'error' : 'warn'}] ${message} @${sourceId}:${line}`)
+      }
+    })
+  }
+
   loadContent()
 }
 

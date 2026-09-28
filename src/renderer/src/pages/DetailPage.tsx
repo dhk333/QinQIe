@@ -4,7 +4,7 @@ import {
   parsePsd,
   parsePsdFallback,
   fetchPsdFile,
-  materializeBitmaps,
+  materializePixels,
   flattenLayers,
   buildCompositeCanvas,
   renderLayerCanvas,
@@ -402,11 +402,16 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       .then(async (decoded) => {
         if (req.isDead()) return drop()
         drop()
-        // ImageBitmap 只是跨线程载体，浏览器会很快丢弃其解码缓存 → 逐张固化成 DOM canvas；
-        // 固化按像素量分帧，解码完成瞬间不再冻结主线程
-        await materializeBitmaps(decoded.rnodes, decoded.canvasMap, req.isDead)
-        if (req.isDead()) return
-        canvasMapRef.current = decoded.canvasMap
+        // Worker 传回的是原始像素字节（惰性数据，不会像 ImageBitmap 那样衰减）：
+        // 逐条固化成 DOM canvas，按像素量分帧，解码完成瞬间不再冻结主线程
+        const canvasMap = await materializePixels(
+          decoded.rnodes,
+          decoded.canvasEntries,
+          decoded.maskEntries,
+          req.isDead
+        )
+        if (!canvasMap || req.isDead()) return
+        canvasMapRef.current = canvasMap
         setRnodes(decoded.rnodes)
         setPreviewCanvas(null)
         setLoadTarget(100)

@@ -7,6 +7,14 @@ import { buildRNode, type RNode } from './compositor'
 /** 图层位图：主线程解析产出 DOM canvas；Worker 解码产出 ImageBitmap（transferToImageBitmap 零拷贝转移） */
 export type LayerBitmap = HTMLCanvasElement | ImageBitmap
 
+/** Worker 回传的逐层像素（RGBA 原始字节）。原始字节是惰性数据，不存在
+ *  ImageBitmap 解码缓存数秒内被丢弃（变全透明）的问题，主线程可以任意分帧固化 */
+export interface PixelEntry {
+  w: number
+  h: number
+  data: Uint8ClampedArray
+}
+
 /** 用 PsdLayer 树的 id 反推合成器节点树，保证选中/显隐状态两边通用 */
 export function toRNodes(layers: Layer[], ids: WeakMap<Layer, number>): RNode[] {
   return layers.map((l) =>
