@@ -332,7 +332,9 @@ export async function materializePixels(
     const c = document.createElement('canvas')
     c.width = e.w
     c.height = e.h
-    const ctx = c.getContext('2d')!
+    // 与 browserEnv 同理：图层画布之后会被 measureLayerContent/取色反复 getImageData，
+    // 建上下文时就固定 CPU 后端，避免每次读像素走 GPU 回读
+    const ctx = c.getContext('2d', { willReadFrequently: true })!
     // 原始字节直写：与旧 ImageBitmap drawImage 逐像素等价，且无插值/衰减变量
     const img = ctx.createImageData(e.w, e.h)
     img.data.set(e.data)
