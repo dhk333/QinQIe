@@ -49,6 +49,10 @@ interface Props {
   onBack: () => void
 }
 
+type HistEntry =
+  | { type: 'slice'; before: DocSlice[]; after: DocSlice[] }
+  | { type: 'edit'; before: LayerEdits; after: LayerEdits }
+
 function findInTree(nodes: PsdLayer[], id: number): PsdLayer | null {
   for (const n of nodes) {
     if (n.id === id) return n
@@ -181,12 +185,14 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const [selectedSliceIds, setSelectedSliceIds] = useState<Set<string>>(new Set())
   const [showSlices, setShowSlices] = useState(true)
   const sliceSeq = useRef(1)
-  // 切片撤销栈：切片是小数组，直接存快照比存反操作可靠
-  const histRef = useRef<{ past: DocSlice[][]; future: DocSlice[][] }>({ past: [], future: [] })
+  // 统一撤销栈：切片与图层编辑按改动时间线共用一组 past/future，直接存改动前后快照
+  const histRef = useRef<{
+    past: HistEntry[]
+    future: HistEntry[]
+  }>({ past: [], future: [] })
   const editBaseRef = useRef<DocSlice[] | null>(null)
+  const editsBaseRef = useRef<LayerEdits | null>(null)
   const lastSavedRef = useRef<DocSlice[]>(slices)
-  const slicesRef = useRef(slices)
-  slicesRef.current = slices
   // 批量导出参数（图层与切片共用一套弹层）
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchFmt, setBatchFmt] = useState<ExportFormat>(() => loadExportPrefs().format)
@@ -219,7 +225,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     const t = setTimeout(() => {
       if (editBaseRef.current !== null && editBaseRef.current !== slices) {
         const { past } = histRef.current
-        past.push(editBaseRef.current)
+        past.push({ type: 'slice', before: editBaseRef.current, after: slices })
         if (past.length > 80) past.shift()
         histRef.current.future = []
         editBaseRef.current = null
@@ -234,31 +240,47 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     return () => clearTimeout(t)
   }, [slices, onUpdatePsd])
 
-  const undoSlices = useCallback(() => {
-    const prev = histRef.current.past.pop()
-    if (!prev) return
-    histRef.current.future.push(slicesRef.current)
-    editBaseRef.current = null
-    setSlicesRaw(prev)
+  // 撤销/重做沿统一时间线走：弹出一条记录，把对应通道恢复到快照值，两个 base 引用清空防误提交
+  const applyHist = useCallback((e: HistEntry, side: 'before' | 'after') => {
+    if (e.type === 'slice') setSlicesRaw(e[side])
+    else setLayerEditsRaw(e[side])
   }, [])
-
-  const redoSlices = useCallback(() => {
-    const next = histRef.current.future.pop()
-    if (!next) return
-    histRef.current.past.push(slicesRef.current)
+  const undoLast = useCallback(() => {
+    const entry = histRef.current.past.pop()
+    if (!entry) return
+    histRef.current.future.push(entry)
     editBaseRef.current = null
-    setSlicesRaw(next)
-  }, [])
+    editsBaseRef.current = null
+    applyHist(entry, 'before')
+  }, [applyHist])
+  const redoLast = useCallback(() => {
+    const entry = histRef.current.future.pop()
+    if (!entry) return
+    histRef.current.past.push(entry)
+    editBaseRef.current = null
+    editsBaseRef.current = null
+    applyHist(entry, 'after')
+  }, [applyHist])
 
   // 图层编辑量：只存 diff，按 layer.key 索引随项目 JSON 持久化，PSD 源文件永不回写
   const [layerEdits, setLayerEditsRaw] = useState<LayerEdits>(() => psd.layerEdits ?? {})
   const editSavedRef = useRef(layerEdits)
   /** 面板写回的唯一入口：改哪一项就只传那一项，显式 undefined 表示恢复 PSD 原值 */
   const patchLayerEdit = useCallback((layer: PsdLayer, patch: Partial<LayerEdit>) => {
-    setLayerEditsRaw((prev) => patchEdit(prev, layer.key, editBaseName(layer), patch))
+    setLayerEditsRaw((prev) => {
+      if (editsBaseRef.current === null) editsBaseRef.current = prev
+      return patchEdit(prev, layer.key, editBaseName(layer), patch)
+    })
   }, [])
   useEffect(() => {
     const t = setTimeout(() => {
+      if (editsBaseRef.current !== null && editsBaseRef.current !== layerEdits) {
+        const { past } = histRef.current
+        past.push({ type: 'edit', before: editsBaseRef.current, after: layerEdits })
+        if (past.length > 80) past.shift()
+        histRef.current.future = []
+        editsBaseRef.current = null
+      }
       if (editSavedRef.current === layerEdits) return
       editSavedRef.current = layerEdits
       onUpdatePsd((p) => {
@@ -273,11 +295,14 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     void dialog({
       type: 'confirm',
       title: t('清空本文档的图层编辑？'),
-      desc: t('所有图层回到 PSD 原值，此操作不可撤销。'),
+      desc: t('所有图层回到 PSD 原值，可用 Ctrl+Z 撤销。'),
       okText: t('清空'),
       danger: true
     }).then((ok) => {
-      if (ok) setLayerEditsRaw({})
+      if (ok) {
+        if (editsBaseRef.current === null) editsBaseRef.current = layerEdits
+        setLayerEditsRaw({})
+      }
     })
   }, [dialog, layerEdits, t])
   // 投影发生在原始树之后、所有消费者之前：画布、图层树、面板、四条导出路径拿到的是同一份
@@ -376,6 +401,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         setSlicesRaw(restored)
         setSelectedSliceIds(new Set())
         editBaseRef.current = null
+        editsBaseRef.current = null
         histRef.current = { past: [], future: [] }
         sliceSeq.current = restored.reduce((m, s) => Math.max(m, Number(s.no) || 0), 0) + 1
         // 图层编辑同样从项目 JSON 恢复；引用对齐避免挂载即触发一次无谓保存
@@ -964,10 +990,10 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         deleteSelectedSlices()
         break
       case 'edit.undo':
-        undoSlices()
+        undoLast()
         break
       case 'edit.redo':
-        redoSlices()
+        redoLast()
         break
       case 'slice.rename':
         if (selectedSlice) {
@@ -1062,6 +1088,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           selectedIds={selectedIds}
           onSelect={handleLayerSelect}
           onToggleHidden={toggleHidden}
+          onRestoreVisibility={() => setHiddenIds(new Set())}
           onContextMenu={handleLayerContext}
         />
         <span

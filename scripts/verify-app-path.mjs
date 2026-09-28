@@ -16,6 +16,7 @@ globalThis.document = {
 initializeCanvas((w, h) => createCanvas(w, h))
 
 const { readPsd } = await import('ag-psd')
+const { applyLayerEdits } = await import('../src/renderer/src/lib/layerEdits.ts')
 const { parsePsd, decodeLayerCanvases, flattenLayers, indexRNodes, buildCompositeCanvas, renderLayerCanvas } =
   await import('../src/renderer/src/lib/psd.ts')
 const { compositeDocument } = await import('../src/renderer/src/lib/compositor.ts')
@@ -114,6 +115,69 @@ for (const file of argv.length ? argv : DEFAULTS) {
   else if (one.width !== Math.round(leaf.width) || one.height !== Math.round(leaf.height))
     bad(`「${leaf.name}」出图 ${one.width}x${one.height} 与图层 ${Math.round(leaf.width)}x${Math.round(leaf.height)} 不符`)
   else console.log(`  单图层出图 OK  ${one.width}x${one.height}`)
+
+  // 6) 图层编辑投影：位移/圆角/透明度/边框/投影要落到树与 RNode，且合成画面变化只出现在新旧区域并集内
+  const DX = 37
+  const DY = 25
+  const edits = {
+    [leaf.key]: {
+      baseName: leaf.name,
+      dx: DX,
+      dy: DY,
+      radius: 8,
+      opacity: 0.6,
+      border: { size: 3, color: '#ff0000', opacity: 1, position: 'inside' },
+      shadow: { size: 12, distance: 6, angle: 135, choke: 0, color: '#000000', opacity: 0.5 }
+    }
+  }
+  const proj = applyLayerEdits(s1.tree, rnodes, edits)
+  const pLeaf = flattenLayers(proj.tree).find((l) => l.id === leaf.id)
+  const pNode = indexRNodes(proj.rnodes).get(leaf.id)
+  if (!pLeaf || !pNode) bad(`编辑投影后找不到目标图层 id=${leaf.id}`)
+  else {
+    const moveOK =
+      Math.abs(pLeaf.left - (leaf.left + DX)) < 0.01 &&
+      Math.abs(pNode.left - (leaf.left + DX)) < 0.01 &&
+      Math.abs(pNode.top - (leaf.top + DY)) < 0.01
+    const radiusOK = Math.abs(pNode.radius - 8) < 0.01
+    const opacityOK = Math.abs(pNode.opacity - 0.6) < 0.01
+    const fxOK = (pNode.effects?.stroke?.length ?? 0) >= 1 && (pNode.effects?.dropShadow?.length ?? 0) >= 1
+    if (!moveOK) bad(`编辑位移未生效: 树 [${pLeaf.left},${pLeaf.top}] RNode [${pNode.left},${pNode.top}] 期望 [${leaf.left + DX},${leaf.top + DY}]`)
+    if (!radiusOK) bad(`圆角未投影到 RNode: radius=${pNode.radius}`)
+    if (!opacityOK) bad(`透明度未投影: opacity=${pNode.opacity}`)
+    if (!fxOK) bad(`边框/投影未追加进 effects 通道: stroke=${pNode.effects?.stroke?.length} dropShadow=${pNode.effects?.dropShadow?.length}`)
+    if (moveOK && radiusOK && opacityOK && fxOK) console.log(`  编辑投影 OK  「${leaf.name}」位移/圆角/透明度/描边/投影`)
+  }
+  // 幂等：对同一原始树重复投影，结果边界必须一致（编辑只读叠加，不累积）
+  const proj2 = applyLayerEdits(s1.tree, rnodes, edits)
+  const p2 = indexRNodes(proj2.rnodes).get(leaf.id)
+  if (p2 && pNode && (Math.abs(p2.left - pNode.left) > 0.01 || Math.abs(p2.right - pNode.right) > 0.01))
+    bad('编辑投影不幂等：两次投影结果边界不一致')
+  // 合成变化区域必须被新旧矩形并集 + 阴影/描边余量包住
+  const edited = compositeDocument(proj.rnodes, { env }, { width: W, height: H })
+  const d = edited.getContext('2d').getImageData(0, 0, W, H).data
+  let eMinX = 1e9, eMinY = 1e9, eMaxX = -1, eMaxY = -1, eChanged = 0
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const j = (y * W + x) * 4
+      if (a[j] === d[j] && a[j + 1] === d[j + 1] && a[j + 2] === d[j + 2] && a[j + 3] === d[j + 3]) continue
+      eChanged++
+      if (x < eMinX) eMinX = x
+      if (y < eMinY) eMinY = y
+      if (x > eMaxX) eMaxX = x
+      if (y > eMaxY) eMaxY = y
+    }
+  }
+  const epad = Math.max(96, 0.5 * Math.max(leaf.width, leaf.height))
+  const eInside =
+    eMinX >= leaf.left - epad &&
+    eMinY >= leaf.top - epad &&
+    eMaxX <= leaf.left + leaf.width + DX + epad &&
+    eMaxY <= leaf.top + leaf.height + DY + epad
+  if (!eChanged) bad(`编辑「${leaf.name}」后合成画面无变化 → 投影后的 rnodes 没有被合成器采用`)
+  else if (!eInside)
+    bad(`编辑变化区域 [${eMinX},${eMinY},${eMaxX},${eMaxY}] 超出新旧矩形并集 (leaf [${leaf.left},${leaf.top},${leaf.left + leaf.width},${leaf.top + leaf.height}] dx=${DX} dy=${DY})`)
+  else console.log(`  编辑合成 OK  变化 ${eChanged} 像素，落在预期区域`)
 }
 
 console.log(failed ? '\n存在未通过项' : '\n应用数据通路全部通过')

@@ -184,36 +184,178 @@ export function readLayerPixels(
 }
 
 /**
+ * 图层位图的「可见内容」度量：PSD 位图边界常比真实图形大一圈（透明留白/抗锯齿），
+ * 面板要显示用户眼中的实际尺寸、还要显示 PSD 自带的圆角，都只能从 alpha 反推。
+ * 只扫四条边缘带（≤64px）与左上角一小段，大层也是毫秒级；结果按位图对象 WeakMap 缓存。
+ */
+export interface LayerContent {
+  /** 位图原始宽高（编辑重采样时的换算基准） */
+  bw: number
+  bh: number
+  /** 不透明内容包围盒：宽 / 高 / 距位图左沿 / 距位图顶沿 */
+  cw: number
+  ch: number
+  padL: number
+  padT: number
+  /** 左上角圆角半径估算（<3px 视为 0） */
+  radius: number
+}
+
+const contentCache = new WeakMap<LayerBitmap, LayerContent | null>()
+
+export function measureLayerContent(img: LayerBitmap): LayerContent | null {
+  const hit = contentCache.get(img)
+  if (hit !== undefined) return hit
+  const computed = computeLayerContent(img)
+  contentCache.set(img, computed)
+  return computed
+}
+
+/** 图层「可见内容」的文档坐标矩形：位图边界常含透明留白，UI 展示/选框统一用这个 */
+export function measureContentRect(
+  layer: PsdLayer,
+  canvasMap: Map<number, LayerBitmap>
+): { left: number; top: number; width: number; height: number } | null {
+  if (layer.children) return null
+  const c = canvasMap.get(layer.id)
+  const m = c ? measureLayerContent(c) : null
+  if (!m || !(m.bw > 0) || !(m.bh > 0)) return null
+  const sx = layer.width / m.bw
+  const sy = layer.height / m.bh
+  return {
+    left: layer.left + m.padL * sx,
+    top: layer.top + m.padT * sy,
+    width: Math.max(1, Math.round(m.cw * sx)),
+    height: Math.max(1, Math.round(m.ch * sy))
+  }
+}
+
+function computeLayerContent(img: LayerBitmap): LayerContent | null {
+  const ALPHA_T = 8
+  const BAND = 64
+  const bw = img.width
+  const bh = img.height
+  if (!(bw > 0 && bh > 0)) return null
+  const strip = (x: number, y: number, w: number, h: number): Uint8ClampedArray | null => {
+    const d = readLayerPixels(img, x, y, w, h)
+    return d ? d.data : null
+  }
+  const alphaAt = (d: Uint8ClampedArray, w: number, x: number, y: number) => d[(y * w + x) * 4 + 3]
+  const rowOpaque = (d: Uint8ClampedArray, w: number, y: number) => {
+    for (let x = 0; x < w; x++) if (alphaAt(d, w, x, y) > ALPHA_T) return true
+    return false
+  }
+  const colOpaque = (d: Uint8ClampedArray, w: number, x: number, y0: number, y1: number) => {
+    for (let y = y0; y <= y1; y++) if (alphaAt(d, w, x, y) > ALPHA_T) return true
+    return false
+  }
+  const bandH = Math.min(bh, BAND)
+  const topStrip = strip(0, 0, bw, bandH)
+  if (!topStrip) return null
+  let padT = 0
+  while (padT < bandH && !rowOpaque(topStrip, bw, padT)) padT++
+  let padB = 0
+  if (padT < bh) {
+    const botH = Math.min(bh - padT, bandH)
+    const botStrip = strip(0, bh - botH, bw, botH)
+    if (botStrip) {
+      padB = botH - 1
+      while (padB > 0 && !rowOpaque(botStrip, bw, padB)) padB--
+      padB = botH - 1 - padB
+    }
+  }
+  const contentH = bh - padT - padB
+  if (contentH <= 0) return null
+  const bandW = Math.min(bw, BAND)
+  let padL = 0
+  const leftStrip = strip(0, padT, bandW, contentH)
+  if (leftStrip) {
+    while (padL < bandW && !colOpaque(leftStrip, bandW, padL, 0, contentH - 1)) padL++
+  }
+  let padR = 0
+  const rightW = Math.min(bw - padL, bandW)
+  if (rightW > 0) {
+    const rightStrip = strip(bw - rightW, padT, rightW, contentH)
+    if (rightStrip) {
+      padR = rightW - 1
+      while (padR > 0 && !colOpaque(rightStrip, rightW, padR, 0, contentH - 1)) padR--
+      padR = rightW - 1 - padR
+    }
+  }
+  const contentW = bw - padL - padR
+  if (contentW <= 0) return null
+  // 圆角估算：PS 的半径值 = 圆弧与两条直边的切点距离，也就是「内容框顶行的第一个不透明像素离左缘多远」
+  // （等价地，「左列第一个不透明像素离顶缘多远」）。柔边/平滑圆角会让弧中段比标准圆更满，
+  // 但两个切点读数与 PS 面板里的半径一致，所以只量切点、不做弧拟合。
+  let radius = 0
+  const cornerW = Math.min(contentW, BAND)
+  const cornerH = Math.min(contentH, BAND)
+  const corner = strip(padL, padT, cornerW, cornerH)
+  if (corner) {
+    let xt = -1
+    for (let x = 0; x < cornerW; x++)
+      if (alphaAt(corner, cornerW, x, 0) > 128) {
+        xt = x
+        break
+      }
+    let yt = -1
+    for (let y = 0; y < cornerH; y++)
+      if (alphaAt(corner, cornerW, 0, y) > 128) {
+        yt = y
+        break
+      }
+    const cuts = [xt, yt].filter((v) => v >= 0)
+    if (cuts.length) {
+      const est = Math.round(cuts.reduce((a, b) => a + b, 0) / cuts.length)
+      radius = est >= 3 ? est : 0
+    }
+  }
+  return { bw, bh, cw: contentW, ch: contentH, padL, padT, radius }
+}
+
+/**
  * Worker 回传的 ImageBitmap 只能当临时载体：实测其解码缓存会在数秒内被丢弃，
  * 位图变成全透明但 width/height 不变。收到后立刻逐张拷成 DOM canvas 作为长期
- * 像素存储（同一实例只拷一次，保持 rnode 与 canvasMap 的引用一致），再 close 释放。
+ * 像素存储（同一实例只拷一次，保持 rnode 与 canvasMap 的引用一致）。
+ * 每张位图先收齐全部引用槽位，拷完立即 close：大文档像素总量可达 GB 级，
+ * 若像旧实现那样全部拷完再统一 close，bitmap+canvas 两份像素会同时存在，峰值翻倍直接把渲染进程压崩。
  */
 export function materializeBitmaps(
   rnodes: RNode[],
   canvasMap: Map<number, LayerBitmap>
 ): void {
-  const copies = new Map<ImageBitmap, HTMLCanvasElement>()
-  const copy = (b: ImageBitmap): HTMLCanvasElement => {
-    let c = copies.get(b)
-    if (!c) {
-      c = document.createElement('canvas')
-      c.width = b.width
-      c.height = b.height
-      c.getContext('2d')?.drawImage(b, 0, 0)
-      copies.set(b, c)
-    }
-    return c
+  const slots = new Map<ImageBitmap, ((c: HTMLCanvasElement) => void)[]>()
+  const add = (b: ImageBitmap, set: (c: HTMLCanvasElement) => void): void => {
+    const list = slots.get(b)
+    if (list) list.push(set)
+    else slots.set(b, [set])
   }
   const walk = (ns: RNode[]): void => {
     for (const n of ns) {
-      if (n.canvas instanceof ImageBitmap) n.canvas = copy(n.canvas)
-      if (n.mask?.canvas instanceof ImageBitmap) n.mask.canvas = copy(n.mask.canvas)
+      if (n.canvas instanceof ImageBitmap) {
+        const b = n.canvas
+        add(b, (c) => (n.canvas = c))
+      }
+      const mb = n.mask?.canvas
+      if (mb instanceof ImageBitmap) {
+        const m = n.mask!
+        add(mb, (c) => (m.canvas = c))
+      }
       if (n.children) walk(n.children)
     }
   }
   walk(rnodes)
-  for (const [id, b] of canvasMap) if (b instanceof ImageBitmap) canvasMap.set(id, copy(b))
-  for (const b of copies.keys()) b.close()
+  for (const [id, b] of canvasMap) {
+    if (b instanceof ImageBitmap) add(b, (c) => void canvasMap.set(id, c))
+  }
+  for (const [b, sets] of slots) {
+    const c = document.createElement('canvas')
+    c.width = b.width
+    c.height = b.height
+    c.getContext('2d')?.drawImage(b, 0, 0)
+    for (const set of sets) set(c)
+    b.close()
+  }
 }
 
 export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = false): ParseResult {

@@ -1,5 +1,6 @@
 import type { LayerEdit, PsdLayer } from '@/types'
 import type { EffectInfo, RNode, ShadowInfo, StrokeInfo } from './compositor'
+import { measureLayerContent, type LayerBitmap } from './psd'
 
 /** 一份 PSD 的全部图层编辑量，按 PsdLayer.key 索引，随项目 JSON 持久化 */
 export type LayerEdits = Record<string, LayerEdit>
@@ -126,7 +127,17 @@ function project(
   const sx = w0 > 0 ? nw / w0 : 1
   const sy = h0 > 0 ? nh / h0 : 1
 
-  const rt: RNode = { ...r, bitmap: null, seg: null }
+  // 克隆必须甩掉合成期写入的记忆化结果：编辑可能改了混合模式/透明度，
+  // 带着旧的 _indep/_sig 会走错误的「背景无关」缓存路径，产出偏差像素
+  const rt: RNode = {
+    ...r,
+    bitmap: null,
+    seg: null,
+    _sig: undefined,
+    _sigKey: undefined,
+    _lc: undefined,
+    _indep: undefined
+  }
   if (rkids) rt.children = rkids
   if (rkids && !isLeaf) {
     const u = unionOfRects(rkids)
@@ -160,8 +171,17 @@ function project(
     rt.destW = nw
     rt.destH = nh
   }
-  const radius = clampRadius(e?.radius, rt.right - rt.left, rt.bottom - rt.top)
-  if (radius !== undefined) rt.radius = radius
+  // 圆角套在「可见内容」矩形上：位图边界常含透明留白，若按位图四角裁，留白会把裁角垫掉，
+  // 用户看到的圆角永远到不了内容角上（= 改了没变化）。半径也按内容短边钳制。
+  const content = isLeaf && r.canvas ? measureLayerContent(r.canvas as LayerBitmap) : null
+  const padX = content ? (content.padL * nw) / content.bw : 0
+  const padY = content ? (content.padT * nh) / content.bh : 0
+  const radius = clampRadius(e?.radius, nw - padX * 2, nh - padY * 2)
+  if (radius !== undefined) {
+    rt.radius = radius
+    if (content && (content.padL > 0 || content.padT > 0))
+      rt.radiusPad = { x: content.padL * (nw / content.bw), y: content.padT * (nh / content.bh) }
+  }
   if (e?.border || e?.shadow) rt.effects = withUserFx(r.effects, e)
   if (e?.opacity !== undefined) rt.opacity = e.opacity
   if (e?.blendMode) rt.blendMode = e.blendMode
@@ -247,12 +267,5 @@ export function editBaseName(layer: PsdLayer): string {
   const out: LayerEdits = { ...edits }
   if (isEditable(next)) out[key] = next
   else delete out[key]
-  return out
-}
-
-export function dropEdit(edits: LayerEdits, key: string): LayerEdits {
-  if (!(key in edits)) return edits
-  const out: LayerEdits = { ...edits }
-  delete out[key]
   return out
 }

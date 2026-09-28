@@ -149,6 +149,8 @@ export interface RNode {
   children?: RNode[]
   /** 圆角半径（文档 px）：编辑器覆盖层写入，把内容裁成四角圆润的形状 */
   radius?: number
+  /** 圆角裁切基准的内缩（位图像素）：位图边界常含透明留白，半径按可见内容矩形套圆角 */
+  radiusPad?: { x: number; y: number }
   /** 重采样目标尺寸（文档 px）：编辑器改过宽高时写入，位图按此尺寸落笔 */
   destW?: number
   destH?: number
@@ -397,17 +399,23 @@ function planeToCanvas(env: Env, plane: Float64Array, w: number, h: number): Ras
  * 圆角矩形的覆盖率 alpha 面：用带内最近距离场（SDF）解析求值，1px 线性过渡做抗锯齿。
  * 不走 ctx.roundRect —— 浏览器与 @napi-rs/canvas 的实现版本不一致，
  * 而这条路径必须两边逐像素相同。
+ * ix/iy 为内缩：位图边界含透明留白时，圆角要套在 (ix, iy) 起的可见内容矩形上，而不是位图四角。
  */
-function roundedAlpha(w: number, h: number, radius: number): Float64Array {
+function roundedAlpha(w: number, h: number, radius: number, ix = 0, iy = 0): Float64Array {
   const out = new Float64Array(w * h)
-  const r = Math.min(radius, w / 2, h / 2)
-  const hw = w / 2
-  const hh = h / 2
+  const cw = Math.max(1, w - ix * 2)
+  const chh = Math.max(1, h - iy * 2)
+  const r = Math.min(radius, cw / 2, chh / 2)
+  const cx = ix + cw / 2
+  const cy = iy + chh / 2
+  // 内侧直边半尺寸：圆角把直边往内推 r，剩下的才是矩形的"方"部分
+  const hw = cw / 2 - r
+  const hh = chh / 2 - r
   for (let y = 0; y < h; y++) {
-    const qy = Math.abs(y + 0.5 - hh) - (hh - r)
+    const qy = Math.abs(y + 0.5 - cy) - hh
     const row = y * w
     for (let x = 0; x < w; x++) {
-      const qx = Math.abs(x + 0.5 - hw) - (hw - r)
+      const qx = Math.abs(x + 0.5 - cx) - hw
       // 四条边内侧的距离为负，只有真的落在角上才需要算圆弧距离
       const d = Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r
       const a = 0.5 - d
@@ -418,10 +426,10 @@ function roundedAlpha(w: number, h: number, radius: number): Float64Array {
 }
 
 /** 就地裁剪：把画布 alpha 乘上圆角矩形覆盖率，颜色不动 */
-function clipCorners(env: Env, src: RasterCanvas, radius: number): void {
+function clipCorners(env: Env, src: RasterCanvas, radius: number, ix = 0, iy = 0): void {
   const ctx = src.getContext('2d')
   ctx.globalCompositeOperation = 'destination-in'
-  ctx.drawImage(planeToCanvas(env, roundedAlpha(src.width, src.height, radius), src.width, src.height), 0, 0)
+  ctx.drawImage(planeToCanvas(env, roundedAlpha(src.width, src.height, radius, ix, iy), src.width, src.height), 0, 0)
   ctx.globalCompositeOperation = 'source-over'
 }
 
@@ -433,6 +441,16 @@ function resample(env: Env, src: LeafSource, w: number, h: number): RasterCanvas
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, w, h)
   return out
+}
+
+/** 圆角内缩随重采样等比缩放：内缩是以原始位图像素记的，落笔画布可能已被 destW/destH 放大缩小 */
+function radiusPadFor(n: RNode): { x: number; y: number } | undefined {
+  const p = n.radiusPad
+  if (!p) return undefined
+  const bw = n.canvas?.width ?? 0
+  const bh = n.canvas?.height ?? 0
+  if (!bw || !bh) return p
+  return { x: (p.x * (n.destW ?? bw)) / bw, y: (p.y * (n.destH ?? bh)) / bh }
 }
 
 // ---------------------------------------------------------------- 蒙版
@@ -621,7 +639,8 @@ function bake(
   rect: Rect,
   e: EffectInfo | null | undefined,
   fill: number,
-  radius = 0
+  radius = 0,
+  radiusPad?: { x: number; y: number }
 ): RasterCanvas {
   const c = env.createCanvas(rect.w, rect.h)
   const ctx = c.getContext('2d')
@@ -638,7 +657,7 @@ function bake(
   const inner = env.createCanvas(content.width, content.height)
   inner.getContext('2d').drawImage(content, 0, 0)
   // 圆角先于样式生效：描边/投影都以裁过的轮廓为形状，外描边的转角半径才会是 r+w
-  if (radius) clipCorners(env, inner, radius)
+  if (radius) clipCorners(env, inner, radius, radiusPad?.x ?? 0, radiusPad?.y ?? 0)
   const alpha = canvasAlpha(env, inner)
   const outer = padPlane(alpha, rect.w, rect.h, ox, oy)
 
@@ -702,7 +721,7 @@ export function leafBitmap(n: RNode, env: Env): { canvas: RasterCanvas; rect: Re
   const rect = nodeRect(n)
   if (isEmpty(rect)) return null
   n.bitmap = {
-    canvas: bake(env, content, n.left, n.top, rect, n.effects, n.fillOpacity, n.radius),
+    canvas: bake(env, content, n.left, n.top, rect, n.effects, n.fillOpacity, n.radius, radiusPadFor(n)),
     rect
   }
   return n.bitmap
@@ -770,7 +789,7 @@ function clipAlpha(n: RNode, rc: RenderCtx, within?: Rect | null): { canvas: Lea
   // 圆过角的图层当剪贴基底时，裁切轮廓也要跟着圆角走
   if (n.radius)
     return {
-      canvas: bake(rc.env, content, n.left, n.top, contentRect(n), null, n.fillOpacity, n.radius),
+      canvas: bake(rc.env, content, n.left, n.top, contentRect(n), null, n.fillOpacity, n.radius, radiusPadFor(n)),
       x: n.left,
       y: n.top
     }

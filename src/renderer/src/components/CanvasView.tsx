@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
-import { buildCompositeCanvas, flattenLayers, readLayerPixels, type LayerBitmap } from '@/lib/psd'
+import { buildCompositeCanvas, flattenLayers, measureContentRect, readLayerPixels, type LayerBitmap } from '@/lib/psd'
+import { HANDLE_CURSORS, toolCursorCss, useToolCursor } from '@/lib/cursors'
 import { useT } from '@/i18n/core'
 import { useUiPrefs } from '@/lib/uiPrefs'
 
@@ -46,12 +47,6 @@ interface Props {
 
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 const HANDLES: HandleId[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
-const HANDLE_CURSOR: Record<HandleId, string> = {
-  nw: 'nwse-resize', se: 'nwse-resize',
-  ne: 'nesw-resize', sw: 'nesw-resize',
-  n: 'ns-resize', s: 'ns-resize',
-  e: 'ew-resize', w: 'ew-resize'
-}
 const MIN_SLICE = 4
 
 interface DragState {
@@ -182,6 +177,14 @@ export default function CanvasView({
   const drag = useRef<DragState | null>(null)
   /** 整篇合成结果：只在图层内容/显隐变化时重建，平移缩放只搬运这张图 */
   const composite = useRef<{ rnodes: RNode[]; hiddenIds: Set<number>; canvas: HTMLCanvasElement } | null>(null)
+  /** 每棵投影树的「可见内容框」测量缓存：位图不变则结果不变 */
+  const boxCache = useRef(new WeakMap<PsdLayer, { left: number; top: number; width: number; height: number }>())
+  /** 当前工具的自绘光标（箭头 / 刀 / 滴管 / 手），PNG 光栅化好了才有值 */
+  const toolCursor = useToolCursor(tool)
+  /** 空格临时平移 = 抓手，直接借用它的光标 */
+  const panCursor = toolCursorCss('hand') ?? 'grab'
+  /** 自绘光标还没生成好的那一瞬用系统光标兜底，避免空白 */
+  const fallbackCursor = tool === 'slice' || tool === 'picker' ? 'crosshair' : tool === 'hand' ? 'grab' : 'default'
 
   useEffect(() => {
     const el = containerRef.current
@@ -273,6 +276,18 @@ export default function CanvasView({
 
   useImperativeHandle(apiRef, () => ({ fit, applyZoom, zoomTo, getZoom: () => zoom }), [fit, applyZoom, zoomTo, zoom])
 
+  // 选框/标注以「可见内容」为准：位图边界常含透明留白，直接画会比图形大一圈。
+  // 编辑过的图层同样要量——投影后的 width 仍是位图边界，只有 alpha 才对应眼中的图形；
+  // 留白按 图层宽/位图宽 缩放，重采样后依旧精确（组没有位图，度量返回 null 就照用图层边界）。
+  const layerBox = (l: PsdLayer) => {
+    let b = boxCache.current.get(l)
+    if (!b) {
+      b = measureContentRect(l, canvasMap) ?? l
+      boxCache.current.set(l, b)
+    }
+    return b
+  }
+
   // 绘制
   useEffect(() => {
     const canvas = canvasRef.current
@@ -312,10 +327,11 @@ export default function CanvasView({
     if (selectedIds.size > 0) {
       for (const layer of flattenLayers(tree)) {
         if (!selectedIds.has(layer.id)) continue
-        const x = offset.x + layer.left * zoom
-        const y = offset.y + layer.top * zoom
-        const w = layer.width * zoom
-        const h = layer.height * zoom
+        const box = layerBox(layer)
+        const x = offset.x + box.left * zoom
+        const y = offset.y + box.top * zoom
+        const w = box.width * zoom
+        const h = box.height * zoom
         ctx.strokeStyle = accent
         ctx.lineWidth = 1
         ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1)
@@ -337,7 +353,7 @@ export default function CanvasView({
         }
         ctx.fillStyle = accent
         ctx.font = '11px sans-serif'
-        ctx.fillText(`${layer.width} × ${layer.height}`, x, y - 6)
+        ctx.fillText(`${box.width} × ${box.height}`, x, y - 6)
       }
     }
 
@@ -352,15 +368,17 @@ export default function CanvasView({
         let ax1 = -Infinity
         let ay1 = -Infinity
         for (const l of sel) {
-          ax0 = Math.min(ax0, l.left)
-          ay0 = Math.min(ay0, l.top)
-          ax1 = Math.max(ax1, l.left + l.width)
-          ay1 = Math.max(ay1, l.top + l.height)
+          const b = layerBox(l)
+          ax0 = Math.min(ax0, b.left)
+          ay0 = Math.min(ay0, b.top)
+          ax1 = Math.max(ax1, b.left + b.width)
+          ay1 = Math.max(ay1, b.top + b.height)
         }
-        const bx0 = hov.left
-        const by0 = hov.top
-        const bx1 = hov.left + hov.width
-        const by1 = hov.top + hov.height
+        const hb = layerBox(hov)
+        const bx0 = hb.left
+        const by0 = hb.top
+        const bx1 = hb.left + hb.width
+        const by1 = hb.top + hb.height
         const X = (v: number): number => offset.x + v * zoom
         const Y = (v: number): number => offset.y + v * zoom
         const gap = (a0: number, a1: number, b0: number, b1: number): number | null =>
@@ -695,12 +713,14 @@ export default function CanvasView({
       const el = containerRef.current
       if (el) {
         if (spaceActive) {
-          el.style.cursor = 'grab'
+          el.style.cursor = panCursor
         } else if (tool === 'slice') {
           const onBadge = slices.some((s) => hitDeleteBadge(mx, my, s))
-          el.style.cursor = onBadge ? 'pointer' : 'crosshair'
+          const sel = selectedSliceIds.size === 1 ? slices.find((s) => selectedSliceIds.has(s.id)) : undefined
+          const h = sel ? hitHandle(mx, my, sel) : null
+          el.style.cursor = onBadge ? 'pointer' : h ? HANDLE_CURSORS[h] : toolCursor ?? fallbackCursor
         } else {
-          el.style.cursor = tool === 'hand' ? 'grab' : 'default'
+          el.style.cursor = toolCursor ?? fallbackCursor
         }
       }
       // 选择工具 + 已有选中：跟踪悬停图层做中心距测量
@@ -785,7 +805,7 @@ export default function CanvasView({
     if (!d.moved && d.sliceId) onSelectSlice(d.sliceId, e.shiftKey || e.ctrlKey || e.metaKey)
   }
 
-  const cursor = spaceActive ? 'grab' : tool === 'slice' ? 'crosshair' : tool === 'hand' ? 'grab' : 'default'
+  const cursor = spaceActive ? panCursor : toolCursor ?? fallbackCursor
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()

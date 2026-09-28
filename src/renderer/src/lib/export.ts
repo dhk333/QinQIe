@@ -1,6 +1,6 @@
 import type { ExportFormat, PsdLayer } from '@/types'
 import type { RNode } from './compositor'
-import { readLayerPixels, type LayerBitmap } from './psd'
+import { readLayerPixels, type LayerBitmap, type LayerContent } from './psd'
 import { t } from '@/i18n/core'
 import { cssUnitBase, fmtLen, type CssUnitsPrefs } from './cssUnits'
 import { getUiPrefs } from './uiPrefs'
@@ -143,27 +143,37 @@ export function layerCssSnippet(
   color: string | null,
   rnode?: RNode,
   units: CssUnitsPrefs = getUiPrefs().cssUnits,
-  docWidth?: number | null
+  docWidth?: number | null,
+  content?: LayerContent | null
 ): string {
   const len = (px: number) => fmtLen(px, units, docWidth)
   const lines: string[] = []
   const kind = layer.type === 'group' ? '图层组' : layer.isText ? '文本图层' : '像素图层'
   const tags = [kind, layer.hidden ? '已隐藏' : null, layer.clipping ? '剪贴蒙版' : null].filter(Boolean)
   lines.push(`/* ${layer.name} · ${tags.join(' · ')} */`)
+  // 写 CSS 要的是「用户眼里的图形」：位图边界常带透明留白，直接照抄会比设计稿宽几个像素。
+  // 编辑重采样后位图与内容各自缩放，所以留白按 图层宽/位图宽 的比例换算到文档坐标。
+  const sx = content && content.bw > 0 ? layer.width / content.bw : 1
+  const sy = content && content.bh > 0 ? layer.height / content.bh : 1
+  const boxLeft = Math.round(layer.left + (content ? content.padL * sx : 0))
+  const boxTop = Math.round(layer.top + (content ? content.padT * sy : 0))
+  const boxW = Math.max(1, Math.round(content ? content.cw * sx : layer.width))
+  const boxH = Math.max(1, Math.round(content ? content.ch * sy : layer.height))
   // 非 px 单位时留一行 PSD 原始像素值，方便回查与换算核对
   if (units.unit !== 'px') {
     const base = cssUnitBase(units, docWidth)
     lines.push(
-      `/* 单位 ${units.unit} · 基准 ${base}px · PSD 原值 X ${layer.left} Y ${layer.top} ${layer.width}×${layer.height} */`
+      `/* 单位 ${units.unit} · 基准 ${base}px · PSD 图层边界 X ${layer.left} Y ${layer.top} ${layer.width}×${layer.height} */`
     )
   }
   lines.push('position: absolute;')
-  lines.push(`left: ${len(layer.left)};`)
-  lines.push(`top: ${len(layer.top)};`)
-  lines.push(`width: ${len(layer.width)};`)
-  lines.push(`height: ${len(layer.height)};`)
-  // 圆角只存在于合成器节点（面板写回时按短边钳制过），取它而不是编辑量原值
-  if (rnode?.radius) lines.push(`border-radius: ${len(rnode.radius)};`)
+  lines.push(`left: ${len(boxLeft)};`)
+  lines.push(`top: ${len(boxTop)};`)
+  lines.push(`width: ${len(boxW)};`)
+  lines.push(`height: ${len(boxH)};`)
+  // 圆角优先取面板编辑值（按短边钳制过写在合成器节点上），没编辑就用位图反推的原值
+  const radius = rnode?.radius ?? (layer.type === 'group' ? 0 : content?.radius ?? 0)
+  if (radius) lines.push(`border-radius: ${len(radius)};`)
   if (layer.opacity < 0.999) lines.push(`opacity: ${Math.round(layer.opacity * 1000) / 1000};`)
   const cssBlend = BLEND_CSS[layer.blendMode]
   if (cssBlend) lines.push(`mix-blend-mode: ${cssBlend};`)

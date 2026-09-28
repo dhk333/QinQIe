@@ -4,7 +4,7 @@ import { BLEND_MODES, blendLabel, layerCssSnippet, layerEffectNames, sampleColor
 import { loadExportPrefs } from '@/lib/exportPrefs'
 import type { CssUnit } from '@/lib/cssUnits'
 import { setUiPrefs, useUiPrefs } from '@/lib/uiPrefs'
-import { indexRNodes, renderLayerCanvas, type LayerBitmap } from '@/lib/psd'
+import { indexRNodes, measureLayerContent, renderLayerCanvas, type LayerBitmap } from '@/lib/psd'
 import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
 import { CheckIcon, ChevronRightIcon, CopyIcon, LinkIcon, UndoIcon } from './icons'
@@ -412,10 +412,19 @@ export default function PropertiesPanel({
     },
     [layer, canvasMap]
   )
+  // 面板显示/编辑与 CSS 片段都以「alpha 可见内容」为准：位图边界含透明留白，
+  // 直接展示会比用户眼中的图形大几个像素。度量按位图对象 WeakMap 缓存，重复调用不重扫。
+  const content = useMemo(
+    () => {
+      const c = layer && layer.type !== 'group' ? canvasMap.get(layer.id) : undefined
+      return c ? measureLayerContent(c) : null
+    },
+    [layer, canvasMap]
+  )
   const css = useMemo(
-    () => (layer ? layerCssSnippet(layer, color, rnode, cssUnits, doc?.width) : ''),
+    () => (layer ? layerCssSnippet(layer, color, rnode, cssUnits, doc?.width, content) : ''),
     // getLang(): CSS 注释内嵌展示标签，语言切换后需重新生成
-    [layer, color, rnode, cssUnits, doc?.width, getLang()]
+    [layer, color, rnode, cssUnits, doc?.width, content, getLang()]
   )
   const setCssUnit = (unit: CssUnit) => setUiPrefs({ cssUnits: { ...cssUnits, unit } })
   const previewUrl = useMemo(() => {
@@ -457,11 +466,6 @@ export default function PropertiesPanel({
   const isGroup = layer.type === 'group'
   const patch = (p: Partial<LayerEdit>) => onPatchEdit(layer, p)
   /** 位置按「相对 PSD 原位的偏移」存，写回只做「新值 − 当前显示值」，组位移与层位移才能各自累加 */
-  const setPos = (axis: 'dx' | 'dy', v: number) => {
-    const shown = axis === 'dx' ? Math.round(layer.left) : Math.round(layer.top)
-    const base = (axis === 'dx' ? edit?.dx : edit?.dy) ?? 0
-    patch({ [axis]: base + (v - shown) } as Partial<LayerEdit>)
-  }
   const borderDefaults: BorderEdit = {
     size: 1,
     color: '#000000',
@@ -484,13 +488,31 @@ export default function PropertiesPanel({
     patch({ border: next.size <= 0 ? undefined : next })
   }
   const setShadow = (p: Partial<ShadowEdit>) => patch({ shadow: { ...shadow, ...p } })
+  // 编辑宽度 = 位图边界重采样，所以输入的内容目标值要按 内容/位图 比例换算回边界尺寸；平移不改变留白，X/Y 换算精确。
+  const sx = content && content.bw > 0 ? layer.width / content.bw : 1
+  const sy = content && content.bh > 0 ? layer.height / content.bh : 1
+  const shownLeft = Math.round(layer.left + (content ? content.padL * sx : 0))
+  const shownTop = Math.round(layer.top + (content ? content.padT * sy : 0))
+  const shownW = Math.max(1, Math.round(content ? content.cw * sx : layer.width))
+  const shownH = Math.max(1, Math.round(content ? content.ch * sy : layer.height))
+  const toBitmapW = (v: number) =>
+    Math.max(1, content && content.cw > 0 ? Math.round((v * content.bw) / content.cw) : v)
+  const toBitmapH = (v: number) =>
+    Math.max(1, content && content.ch > 0 ? Math.round((v * content.bh) / content.ch) : v)
+  const setPos = (axis: 'dx' | 'dy', v: number) => {
+    const shown = axis === 'dx' ? shownLeft : shownTop
+    const base = (axis === 'dx' ? edit?.dx : edit?.dy) ?? 0
+    patch({ [axis]: base + (v - shown) } as Partial<LayerEdit>)
+  }
   const setW = (v: number) => {
-    if (!lockRatio || !layer.height || !layer.width) return patch({ width: v })
-    patch({ width: v, height: Math.max(1, Math.round((v * layer.height) / layer.width)) })
+    const width = toBitmapW(v)
+    if (!lockRatio || shownW <= 0) return patch({ width })
+    patch({ width, height: toBitmapH(Math.max(1, Math.round((v * shownH) / shownW))) })
   }
   const setH = (v: number) => {
-    if (!lockRatio || !layer.height || !layer.width) return patch({ height: v })
-    patch({ height: v, width: Math.max(1, Math.round((v * layer.width) / layer.height)) })
+    const height = toBitmapH(v)
+    if (!lockRatio || shownH <= 0) return patch({ height })
+    patch({ height, width: toBitmapW(Math.max(1, Math.round((v * shownW) / shownH))) })
   }
 
   const exportSummary = `${{ png: 'PNG', jpeg: 'JPG', webp: 'WebP' }[format]} · @${scale}x${
@@ -557,7 +579,7 @@ export default function PropertiesPanel({
           <div className="flex gap-2">
             <NumField
               label="X"
-              value={Math.round(layer.left)}
+              value={shownLeft}
               allowNegative
               dirty={edit?.dx !== undefined}
               title={t('位置')}
@@ -566,7 +588,7 @@ export default function PropertiesPanel({
             />
             <NumField
               label="Y"
-              value={Math.round(layer.top)}
+              value={shownTop}
               allowNegative
               dirty={edit?.dy !== undefined}
               title={t('位置')}
@@ -577,7 +599,7 @@ export default function PropertiesPanel({
           <div className="flex items-center gap-2">
             <NumField
               label="W"
-              value={Math.round(layer.width)}
+              value={shownW}
               min={1}
               disabled={isGroup}
               dirty={edit?.width !== undefined}
@@ -600,7 +622,7 @@ export default function PropertiesPanel({
             </button>
             <NumField
               label="H"
-              value={Math.round(layer.height)}
+              value={shownH}
               min={1}
               disabled={isGroup}
               dirty={edit?.height !== undefined}
@@ -611,9 +633,9 @@ export default function PropertiesPanel({
           </div>
           <NumField
             label={t('圆角')}
-            value={Math.round(edit?.radius ?? rnode?.radius ?? 0)}
+            value={Math.round(edit?.radius ?? content?.radius ?? 0)}
             dirty={edit?.radius !== undefined}
-            title={t('四角统一的圆角半径，导出位图与 CSS 都按它裁切')}
+            title={t('四角统一的圆角半径，导出位图与 CSS 都按它裁切；未编辑时显示从位图 alpha 估算的原值')}
             onCommit={(v) => patch({ radius: v > 0 ? v : undefined })}
             onReset={() => patch({ radius: undefined })}
           />

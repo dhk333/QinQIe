@@ -9,7 +9,8 @@ import {
   FolderIcon,
   ImageIcon,
   SearchIcon,
-  TextIcon
+  TextIcon,
+  UndoIcon
 } from './icons'
 
 interface Props {
@@ -19,6 +20,8 @@ interface Props {
   selectedIds: Set<number>
   onSelect: (layer: PsdLayer, mods: { ctrl: boolean; shift: boolean }) => void
   onToggleHidden: (id: number) => void
+  /** 回到 PSD 原始显隐状态（清零手动开关）；有手动差异时头部会出现恢复条 */
+  onRestoreVisibility: () => void
   onContextMenu?: (layer: PsdLayer, x: number, y: number) => void
 }
 
@@ -156,6 +159,7 @@ const LayerTree = forwardRef<LayerTreeApi, Props>(function LayerTree(
     selectedIds,
     onSelect,
     onToggleHidden,
+    onRestoreVisibility,
     onContextMenu
   },
   ref
@@ -221,6 +225,19 @@ const LayerTree = forwardRef<LayerTreeApi, Props>(function LayerTree(
     [tree, query]
   )
 
+  // 组显隐会把整支后代塞进 hiddenIds，恢复条只报叶子图层数量才不吓人
+  const hiddenCount = useMemo(() => {
+    let n = 0
+    const walk = (nodes: PsdLayer[]) => {
+      for (const x of nodes) {
+        if (x.children) walk(x.children)
+        else if (hiddenIds.has(x.id)) n++
+      }
+    }
+    walk(tree)
+    return n
+  }, [tree, hiddenIds])
+
   const toggleCollapse = (id: number) => {
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -243,6 +260,22 @@ const LayerTree = forwardRef<LayerTreeApi, Props>(function LayerTree(
             className="w-full bg-transparent text-[12px] text-txt outline-none placeholder:text-txt-3"
           />
         </div>
+        {hiddenIds.size > 0 && (
+          <div className="mt-1.5 flex items-center justify-between gap-2 rounded-md bg-panel-2 px-2 py-1">
+            <span className="min-w-0 truncate text-[11.5px] text-txt-3">
+              {t('{n} 个图层被手动隐藏', { n: hiddenCount })}
+            </span>
+            <button
+              type="button"
+              className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11.5px] text-accent transition-colors hover:bg-accent-dim"
+              title={t('恢复到 PSD 原始的图层显隐状态')}
+              onClick={onRestoreVisibility}
+            >
+              <UndoIcon className="h-3 w-3" />
+              {t('恢复')}
+            </button>
+          </div>
+        )}
       </div>
       <div ref={listRef} className="flex-1 overflow-y-auto p-1.5">
         {filtered.length === 0 ? (

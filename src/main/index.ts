@@ -191,11 +191,34 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  // 渲染进程崩溃兜底（超大 PSD 解码吃满内存时的 OOM 是主要来源）：
+  // 崩溃后窗口会永远停在黑屏，这里先亮一页说明再自动重载，回到上次的详情页
+  const loadContent = (): void => {
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    } else {
+      mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    }
   }
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[render-process-gone]', details.reason, details.exitCode)
+    if (mainWindow.isDestroyed() || details.reason === 'clean-exit') return
+    const why =
+      details.reason === 'oom'
+        ? '渲染进程内存耗尽——打开超大 PSD 文件时最常见'
+        : details.reason === 'crashed'
+          ? '渲染进程意外崩溃'
+          : `渲染进程异常退出（${details.reason}）`
+    const html = `<!doctype html><meta charset="utf-8"><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;background:#f3f5f9"><div style="text-align:center;color:#3a4150"><div style="font-size:17px;font-weight:600;margin-bottom:8px">界面出错了</div><div style="font-size:13px;color:#6b7383">${why}<br>3 秒后自动重新启动，你的项目与编辑记录都已保存</div></div></body>`
+    mainWindow.loadURL(
+      'data:text/html;charset=utf-8,' + encodeURIComponent(html)
+    )
+    setTimeout(() => {
+      if (!mainWindow.isDestroyed()) loadContent()
+    }, 3000)
+  })
+
+  loadContent()
 }
 
 // psdfile:// → 本地文件流式响应；渲染层把路径按段 encodeURIComponent（standard scheme 的

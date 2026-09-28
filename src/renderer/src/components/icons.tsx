@@ -1,3 +1,6 @@
+import { KNIFE_D, KNIFE_VIEWBOX } from '@/lib/knifeShape'
+import { TOOL_GLYPHS, glyphPaths } from '@/lib/toolGlyphs'
+
 interface IconProps {
   className?: string
 }
@@ -224,17 +227,18 @@ export function CaretDownIcon({ className }: IconProps) {
 export function MoveIcon({ className }: IconProps) {
   return (
     <svg className={className} {...svgProps} strokeLinejoin="round">
-      <path d="M6 3l12 9-5.5 1L15 19l-2.5 1-2.4-5.8L6 17V3Z" />
+      {glyphPaths(TOOL_GLYPHS.move).map((d) => (
+        <path key={d} d={d} />
+      ))}
     </svg>
   )
 }
 
+/** 切片刀（实心路径，1030×1024 视口）：与画布上切片工具的自定义光标同一枚图形 */
 export function SliceIcon({ className }: IconProps) {
   return (
-    <svg className={className} {...svgProps} strokeLinejoin="round">
-      <path d="M6 3v7M18 3v7M6 10h12" />
-      <path d="M12 10v5.5" />
-      <rect x="4" y="15.5" width="16" height="5.5" rx="1.5" />
+    <svg className={className} viewBox={KNIFE_VIEWBOX} fill="currentColor">
+      <path d={KNIFE_D} />
     </svg>
   )
 }
@@ -242,8 +246,9 @@ export function SliceIcon({ className }: IconProps) {
 export function PickerIcon({ className }: IconProps) {
   return (
     <svg className={className} {...svgProps}>
-      <path d="M13.5 6.5l4 4L8 20H4v-4l9.5-9.5Z" />
-      <path d="M11.5 8.5l4 4M15 3.5a2.1 2.1 0 0 1 3 0l2.5 2.5a2.1 2.1 0 0 1 0 3L19 10.5" />
+      {glyphPaths(TOOL_GLYPHS.picker).map((d) => (
+        <path key={d} d={d} />
+      ))}
     </svg>
   )
 }
@@ -251,7 +256,9 @@ export function PickerIcon({ className }: IconProps) {
 export function HandIcon({ className }: IconProps) {
   return (
     <svg className={className} {...svgProps} strokeLinejoin="round">
-      <path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-5.5v-1a1.5 1.5 0 0 1 3 0V11m0-4.5a1.5 1.5 0 0 1 3 0V13m-9-1v-1.5a1.5 1.5 0 0 0-3 0V16a5 5 0 0 0 5 5h3a5 5 0 0 0 5-5v-2" />
+      {glyphPaths(TOOL_GLYPHS.hand).map((d) => (
+        <path key={d} d={d} />
+      ))}
     </svg>
   )
 }

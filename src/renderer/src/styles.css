@@ -571,7 +571,7 @@ body {
 .zoombar {
   position: absolute; bottom: 69px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 2px;
-  background: var(--frost); backdrop-filter: blur(20px) saturate(1.5);
+  background: #fff; backdrop-filter: blur(20px) saturate(1.5);
   border: 1px solid var(--line-2); border-radius: 8px;
   padding: 5px 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   z-index: 5;
@@ -615,7 +615,7 @@ body {
   position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px;
   max-width: calc(100% - 40px); overflow-x: auto;
-  background: var(--frost); backdrop-filter: blur(20px) saturate(1.5);
+  background: #fff; backdrop-filter: blur(20px) saturate(1.5);
   border: 1px solid var(--line-2); border-radius: 8px;
   padding: 7px 8px 7px 16px; z-index: 6;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);

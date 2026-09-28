@@ -73,6 +73,8 @@ export default {
   '圆角': 'Radius',
   '四角统一的圆角半径，导出位图与 CSS 都按它裁切':
     'Corner radius applied to both the exported bitmap and the CSS',
+  '四角统一的圆角半径，导出位图与 CSS 都按它裁切；未编辑时显示从位图 alpha 估算的原值':
+    'Corner radius applied to both the exported bitmap and the CSS; before you edit it, the value is estimated from the bitmap alpha',
   '外观': 'Appearance',
   '边框': 'Border',
   '无': 'None',
@@ -91,8 +93,12 @@ export default {
   '把本文档所有图层恢复到 PSD 原值': 'Restore every layer in this document to its PSD values',
   '清空本文档编辑': 'Clear layer edits',
   '清空本文档的图层编辑？': 'Clear all layer edits in this document?',
-  '所有图层回到 PSD 原值，此操作不可撤销。':
-    'Every layer returns to its PSD values. This can’t be undone.',
-  '清空': 'Clear'
+  '所有图层回到 PSD 原值，可用 Ctrl+Z 撤销。':
+    'Every layer returns to its PSD values. Undo with Ctrl+Z.',
+  '清空': 'Clear',
+  // 图层树：手动隐藏恢复条
+  '{n} 个图层被手动隐藏': '{n} layers manually hidden',
+  '恢复到 PSD 原始的图层显隐状态': 'Restore the original PSD layer visibility',
+  '恢复': 'Restore'
 } as Record<string, string>
 
