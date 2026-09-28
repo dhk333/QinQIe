@@ -165,7 +165,8 @@ export function readLayerPixels(
 ): ImageData | null {
   if (img instanceof HTMLCanvasElement) {
     try {
-      return img.getContext('2d')?.getImageData(x, y, w, h) ?? null
+      // willReadFrequently：首次建上下文就固定 CPU 后端，后续 4 条边缘带的 getImageData 不走 GPU 回读
+      return img.getContext('2d', { willReadFrequently: true })?.getImageData(x, y, w, h) ?? null
     } catch {
       return null
     }
