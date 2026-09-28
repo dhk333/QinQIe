@@ -55,6 +55,16 @@ type HistEntry =
   | { type: 'slice'; before: DocSlice[]; after: DocSlice[] }
   | { type: 'edit'; before: LayerEdits; after: LayerEdits }
 
+/** 一次全量解码请求：isDead 绑定发起它的那轮加载的生命周期，
+ *  StrictMode 双挂载或换文件后，先一轮的迟到结果整包丢弃，绝不写进新一轮的状态 */
+interface DecodeRequest {
+  buffer: Uint8Array
+  name: string
+  tree: PsdLayer[]
+  path: string
+  isDead: () => boolean
+}
+
 function findInTree(nodes: PsdLayer[], id: number): PsdLayer | null {
   for (const n of nodes) {
     if (n.id === id) return n
@@ -74,16 +84,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null)
   const [rawRnodes, setRnodes] = useState<RNode[]>([])
   const canvasMapRef = useRef<Map<number, LayerBitmap>>(new Map())
-  /** 第二遍全量解码任务：fetch/结构解析完成后立即交给 Worker，不等入场动画 */
-  const decodeJobRef = useRef<{
-    buffer: Uint8Array
-    name: string
-    tree: PsdLayer[]
-    path: string
-  } | null>(null)
   /** 解码任务句柄：换文件/离开页面时终止 Worker，不再为已抛弃的文档烧解码 */
   const decodeCancelRef = useRef<(() => void) | null>(null)
-  const aliveRef = useRef(false)
   const [hiddenIds, setHiddenIds] = useState<Set<number>>(new Set())
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -388,21 +390,22 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   }, [])
 
   // 全量解码交给 Worker：主线程全程不阻塞。Worker 不占主线程，fetch/解析一结束
-  // 就启动，与加载动画并行跑；换文件/离开页面时 cancel 终止，迟到结果按 aliveRef 丢弃
-  const startDecode = useCallback(() => {
-    const job = decodeJobRef.current
-    if (!job) return
-    decodeJobRef.current = null
-    const { result, cancel } = decodeLayersInWorker(job.buffer, job.tree)
+  // 就启动，与加载动画并行跑；req.isDead 绑定发起本轮加载的生命周期，
+  // StrictMode 双挂载 / 换文件后，先一轮的迟到结果一律丢弃
+  const startDecode = useCallback((req: DecodeRequest) => {
+    const { result, cancel } = decodeLayersInWorker(req.buffer, req.tree)
     decodeCancelRef.current = cancel
+    const drop = () => {
+      if (decodeCancelRef.current === cancel) decodeCancelRef.current = null
+    }
     result
       .then(async (decoded) => {
-        decodeCancelRef.current = null
-        if (!aliveRef.current) return
+        if (req.isDead()) return drop()
+        drop()
         // ImageBitmap 只是跨线程载体，浏览器会很快丢弃其解码缓存 → 逐张固化成 DOM canvas；
         // 固化按像素量分帧，解码完成瞬间不再冻结主线程
-        await materializeBitmaps(decoded.rnodes, decoded.canvasMap, () => !aliveRef.current)
-        if (!aliveRef.current) return
+        await materializeBitmaps(decoded.rnodes, decoded.canvasMap, req.isDead)
+        if (req.isDead()) return
         canvasMapRef.current = decoded.canvasMap
         setRnodes(decoded.rnodes)
         setPreviewCanvas(null)
@@ -410,18 +413,18 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         setDecoding(false)
       })
       .catch(async (e: unknown) => {
-        decodeCancelRef.current = null
-        // 主动取消：文档已抛弃，静默收场，不走备用解析器
-        if (!aliveRef.current || e instanceof WorkerCancelledError) return
+        // 主动取消或本轮加载已作废：静默收场，不走备用解析器
+        if (req.isDead() || e instanceof WorkerCancelledError) return drop()
+        drop()
         // ag-psd 能读结构但位图/蒙版数据解不动（如 Invalid mask size），
         // 整文档交给备用解析器重建树+位图，节点 id 变了需重置选中态。
         // buffer 已转移进 Worker：解码失败会随错误回传；Worker 整体崩溃拿不回，按原路径重读
         try {
           const returned = e instanceof WorkerDecodeError ? e.returnedBuffer : undefined
-          const buf = returned ? new Uint8Array(returned) : (await fetchPsdFile(job.path)).buffer
-          if (!aliveRef.current) return
-          const fb = await parsePsdFallback(buf, job.name)
-          if (!aliveRef.current) return
+          const buf = returned ? new Uint8Array(returned) : (await fetchPsdFile(req.path)).buffer
+          if (req.isDead()) return
+          const fb = await parsePsdFallback(buf, req.name)
+          if (req.isDead()) return
           canvasMapRef.current = fb.canvasMap
           setRnodes(fb.rnodes)
           setDoc(fb.doc)
@@ -432,7 +435,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           setPreviewCanvas(null)
           toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
         } catch {
-          if (!aliveRef.current) return
+          if (req.isDead()) return
           toast(t('图层位图解码失败'), 'error')
         }
         setLoadTarget(100)
@@ -443,8 +446,9 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   // 加载 PSD：结构缓存命中则跳过主线程解析（预览用缓存合成图）；未命中走两阶段——
   // 先只做结构解析（~50ms）让图层树/面板立即可用，位图解码随后立刻交给 Worker
   useEffect(() => {
+    // 存活标志用局部变量而不是 ref：StrictMode 双挂载时第一轮的链路必须随 cleanup
+    // 一起作废，不能被第二轮挂载「复活」（否则同一文件会被两条链并行解析两遍）
     let alive = true
-    aliveRef.current = true
     setLoading(true)
     setLoadPct(0)
     setLoaderShown(false)
@@ -485,8 +489,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           setDecoding(true)
           const { name, buffer } = await fetchPsdFile(psd.path)
           if (!alive) return
-          decodeJobRef.current = { buffer, name, tree: cached.entry.tree, path: psd.path }
-          startDecode()
+          startDecode({ buffer, name, tree: cached.entry.tree, path: psd.path, isDead: () => !alive })
           return
         }
         // ② 缓存未命中：流式读文件 + 结构解析（内嵌合成图先顶预览）
@@ -520,8 +523,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         if (parsed.canvasMap.size === 0) {
           setDecoding(true)
           setLoadTarget(88)
-          decodeJobRef.current = { buffer, name, tree: parsed.tree, path: psd.path }
-          startDecode()
+          startDecode({ buffer, name, tree: parsed.tree, path: psd.path, isDead: () => !alive })
         }
       } catch {
         if (!alive) return
@@ -532,10 +534,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     })()
     return () => {
       alive = false
-      aliveRef.current = false
       decodeCancelRef.current?.()
       decodeCancelRef.current = null
-      decodeJobRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [psd.path])
