@@ -39,6 +39,15 @@ const api = {
   clearThumbCache: (): Promise<number> => ipcRenderer.invoke('app:clear-thumb-cache'),
   trimThumbCache: (maxBytes: number): Promise<{ deleted: number; freed: number }> =>
     ipcRenderer.invoke('app:trim-thumb-cache', maxBytes),
+  // PSD 详情页结构缓存（userData/psd-cache，键含 mtime 自动失效；失败一律静默）
+  psdCacheRead: (
+    p: string
+  ): Promise<{ hit: boolean; entry?: unknown; preview?: string | null }> =>
+    ipcRenderer.invoke('psd-cache:read', p),
+  psdCacheWrite: (
+    p: string,
+    payload: { entry: unknown; preview?: { bytes: Uint8Array; ext: string } }
+  ): Promise<boolean> => ipcRenderer.invoke('psd-cache:write', p, payload),
   // 更新检查
   checkUpdate: (): Promise<
     | { status: 'new'; version: string; url: string; notes: string }

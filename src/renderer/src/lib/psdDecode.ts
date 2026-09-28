@@ -20,7 +20,13 @@ export function decodeLayerCanvases(
   buffer: Uint8Array,
   tree: PsdLayer[]
 ): { canvasMap: Map<number, LayerBitmap>; rnodes: RNode[] } {
-  const psd: Psd = readPsd(buffer, { skipLinkedFilesData: true, skipThumbnail: true })
+  // skipCompositeImageData：主线程结构阶段已留下内嵌合成图做预览，
+  // Worker 这次全量解析再把整篇合成一遍纯属白干（大文档 ≈ 数百毫秒 + 一份文档尺寸画布）
+  const psd: Psd = readPsd(buffer, {
+    skipLinkedFilesData: true,
+    skipThumbnail: true,
+    skipCompositeImageData: true
+  })
   const canvasMap = new Map<number, LayerBitmap>()
   const ids = new WeakMap<Layer, number>()
   const attach = (layers: Layer[], nodes: PsdLayer[]) => {

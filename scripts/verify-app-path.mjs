@@ -13,6 +13,8 @@ globalThis.document = {
     return createCanvas(1, 1)
   }
 }
+// readLayerPixels 用 instanceof 区分 DOM canvas，缺这个全局会在 Node 里直接 ReferenceError
+globalThis.HTMLCanvasElement = createCanvas(1, 1).constructor
 initializeCanvas((w, h) => createCanvas(w, h))
 
 const { readPsd } = await import('ag-psd')

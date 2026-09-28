@@ -319,11 +319,15 @@ function computeLayerContent(img: LayerBitmap): LayerContent | null {
  * 像素存储（同一实例只拷一次，保持 rnode 与 canvasMap 的引用一致）。
  * 每张位图先收齐全部引用槽位，拷完立即 close：大文档像素总量可达 GB 级，
  * 若像旧实现那样全部拷完再统一 close，bitmap+canvas 两份像素会同时存在，峰值翻倍直接把渲染进程压崩。
+ * 拷贝按像素量分帧：整段同步拷会在解码完成瞬间冻结主线程数百毫秒到数秒，
+ * 每拷约 8M 像素（32MB）让出主线程一拍，总耗时不变但入场动画不再被卡住；
+ * isDead 返回 true 时提前放弃（页面已离开，剩余位图交给 GC）。
  */
-export function materializeBitmaps(
+export async function materializeBitmaps(
   rnodes: RNode[],
-  canvasMap: Map<number, LayerBitmap>
-): void {
+  canvasMap: Map<number, LayerBitmap>,
+  isDead?: () => boolean
+): Promise<void> {
   const slots = new Map<ImageBitmap, ((c: HTMLCanvasElement) => void)[]>()
   const add = (b: ImageBitmap, set: (c: HTMLCanvasElement) => void): void => {
     const list = slots.get(b)
@@ -348,14 +352,36 @@ export function materializeBitmaps(
   for (const [id, b] of canvasMap) {
     if (b instanceof ImageBitmap) add(b, (c) => void canvasMap.set(id, c))
   }
+  const CHUNK_PIXELS = 1 << 23
+  let chunk = 0
   for (const [b, sets] of slots) {
+    if (isDead?.()) return
+    const w = b.width
+    const h = b.height
     const c = document.createElement('canvas')
-    c.width = b.width
-    c.height = b.height
+    c.width = w
+    c.height = h
     c.getContext('2d')?.drawImage(b, 0, 0)
     for (const set of sets) set(c)
     b.close()
+    chunk += w * h
+    if (chunk >= CHUNK_PIXELS) {
+      chunk = 0
+      await new Promise((r) => setTimeout(r, 0))
+    }
   }
+}
+
+/**
+ * 缓存载入的图层树沿用了历史节点 id：把模块级 nextId 推到其上，
+ * 避免同会话内后续解析（备用解析器等）分配出与缓存树冲突的 id。
+ */
+export function adoptLayerIds(nodes: PsdLayer[]): void {
+  const walk = (n: PsdLayer): void => {
+    if (n.id >= nextId) nextId = n.id + 1
+    n.children?.forEach(walk)
+  }
+  nodes.forEach(walk)
 }
 
 export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = false): ParseResult {

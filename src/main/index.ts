@@ -373,6 +373,87 @@ async function trimThumbCache(maxBytes: number): Promise<{ deleted: number; free
 
 ipcMain.handle('app:trim-thumb-cache', (_e, maxBytes: number) => trimThumbCache(maxBytes))
 
+// ========== PSD 详情页结构缓存 ==========
+// 键与缩略图同一套：md5(路径|大小|mtime)，源文件一变即换新键自动失效。
+// JSON 存结构树 + 去位图节点树，WebP 存内嵌合成图；重开同一文件渲染层可跳过结构解析。
+const PSD_CACHE_DIR = 'psd-cache'
+const PSD_CACHE_MAX_ENTRIES = 200
+
+async function psdCacheLocate(p: string): Promise<{ dir: string; key: string }> {
+  const st = await stat(p)
+  const key = createHash('md5').update(`${p}|${st.size}|${st.mtimeMs}`).digest('hex')
+  return { dir: join(app.getPath('userData'), PSD_CACHE_DIR), key }
+}
+
+ipcMain.handle(
+  'psd-cache:read',
+  async (_e, p: string): Promise<{ hit: boolean; entry?: unknown; preview?: string | null }> => {
+    try {
+      const { dir, key } = await psdCacheLocate(p)
+      const entry = JSON.parse(await readFile(join(dir, `${key}.json`), 'utf-8'))
+      let preview: string | null = null
+      for (const [ext, mime] of [
+        ['webp', 'image/webp'],
+        ['png', 'image/png']
+      ] as const) {
+        try {
+          preview = `data:${mime};base64,${(await readFile(join(dir, `${key}.${ext}`))).toString('base64')}`
+          break
+        } catch {
+          // 换下一个扩展名
+        }
+      }
+      // 没有预览图的条目撑不起「先见画面后解码」，当 miss 重新解析
+      if (!preview) return { hit: false }
+      return { hit: true, entry, preview }
+    } catch {
+      return { hit: false }
+    }
+  }
+)
+
+ipcMain.handle(
+  'psd-cache:write',
+  async (
+    _e,
+    p: string,
+    payload: { entry: unknown; preview?: { bytes: Uint8Array; ext: string } }
+  ): Promise<boolean> => {
+    try {
+      if (!payload?.entry || !payload.preview?.bytes?.length) return false
+      const { dir, key } = await psdCacheLocate(p)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, `${key}.json`), JSON.stringify(payload.entry))
+      await writeFile(
+        join(dir, `${key}.${payload.preview.ext === 'png' ? 'png' : 'webp'}`),
+        payload.preview.bytes
+      )
+      await prunePsdCache(dir)
+      return true
+    } catch {
+      return false
+    }
+  }
+)
+
+// 条目封顶：超限时从旧到新删（json 连同配套预览图），防止换名打开的文件无限堆积
+async function prunePsdCache(dir: string): Promise<void> {
+  try {
+    const names = (await readdir(dir)).filter((n) => n.endsWith('.json'))
+    if (names.length <= PSD_CACHE_MAX_ENTRIES) return
+    const list = await Promise.all(
+      names.map(async (n) => ({ n, m: (await stat(join(dir, n))).mtimeMs }))
+    )
+    list.sort((a, b) => b.m - a.m)
+    for (const { n } of list.slice(PSD_CACHE_MAX_ENTRIES)) {
+      const base = join(dir, n.replace(/\.json$/, ''))
+      for (const ext of ['.json', '.webp', '.png']) await rm(`${base}${ext}`, { force: true })
+    }
+  } catch {
+    // 清理失败不影响主流程
+  }
+}
+
 // ========== 更新检查（GitHub Releases，无后端；失败一律静默） ==========
 function cmpVer(a: string, b: string): number {
   const pa = a.split('.').map(Number)
