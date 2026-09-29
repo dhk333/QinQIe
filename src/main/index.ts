@@ -218,7 +218,12 @@ function createWindow(): void {
     }, 3000)
   })
 
-  // dev：渲染层 console 的 warn/error 透传到主进程 stdout，排查偶发白屏/崩溃时有据可查
+  // dev 诊断：渲染层 React 警告（含组件栈）透传
+ipcMain.on('app:renderer-log', (_e, text: string) => {
+  console.log('[renderer:stack]', text)
+})
+
+// dev：渲染层 console 的 warn/error 透传到主进程 stdout，排查偶发白屏/崩溃时有据可查
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
       if (level >= 2) {

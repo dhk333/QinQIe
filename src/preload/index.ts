@@ -59,7 +59,9 @@ const api = {
     const listener = (_e: Electron.IpcRendererEvent, id: string): void => cb(id)
     ipcRenderer.on('menu:exec', listener)
     return () => ipcRenderer.removeListener('menu:exec', listener)
-  }
+  },
+  // dev 诊断：渲染层把带组件栈的 React 警告回传主进程落 stdout
+  rendererLog: (text: string): void => ipcRenderer.send('app:renderer-log', text)
 }
 
 contextBridge.exposeInMainWorld('api', api)
