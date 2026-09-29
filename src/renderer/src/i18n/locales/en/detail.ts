@@ -53,6 +53,10 @@ export default {
   '取色器 (I) — 点击画布取色并复制': 'Picker (I) — click the canvas to copy a color',
   '抓手 (H) — 拖拽平移': 'Hand (H) — drag to pan',
   '显示 / 隐藏切片': 'Show / hide slices',
+  // 切片右键菜单与选项弹窗
+  '编辑切片选项…': 'Edit slice options…',
+  '删除切片': 'Delete slice',
+  '切片选项': 'Slice Options',
   '缩小': 'Zoom out',
   '放大': 'Zoom in',
   '适应画布 (Shift+1)': 'Zoom to fit (Shift+1)',

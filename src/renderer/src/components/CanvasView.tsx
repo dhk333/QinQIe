@@ -43,6 +43,8 @@ interface Props {
   onPickColor: (hex: string) => void
   onUpdateSlice: (id: string, rect: { x: number; y: number; w: number; h: number }) => void
   onDeleteSlice: (id: string) => void
+  /** 切片工具下右键切片：先选中再回调（屏幕坐标供上下文菜单定位） */
+  onSliceContext?: (sliceId: string, clientX: number, clientY: number) => void
 }
 
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
@@ -182,6 +184,7 @@ export default function CanvasView({
   onPickColor,
   onUpdateSlice,
   onDeleteSlice,
+  onSliceContext,
   initialView,
   onViewChange
 }: Props) {
@@ -536,21 +539,6 @@ export default function CanvasView({
         ctx.fillRect(x, y, tw, 15)
         ctx.fillStyle = '#fff'
         ctx.fillText(label, x + 5, y + 11)
-        // 右上角删除按钮
-        ctx.fillStyle = '#fff'
-        ctx.strokeStyle = '#ef4444'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.rect(x + w - 15, y + 2, 13, 13)
-        ctx.fill()
-        ctx.stroke()
-        ctx.strokeStyle = '#ef4444'
-        ctx.beginPath()
-        ctx.moveTo(x + w - 11, y + 6)
-        ctx.lineTo(x + w - 5, y + 12)
-        ctx.moveTo(x + w - 5, y + 6)
-        ctx.lineTo(x + w - 11, y + 12)
-        ctx.stroke()
         // 单选时的 8 个控制柄
         if (singleSelected?.id === s.id) {
           ctx.fillStyle = '#fff'
@@ -720,12 +708,6 @@ export default function CanvasView({
     return null
   }
 
-  const hitDeleteBadge = (mx: number, my: number, s: DocSlice): boolean => {
-    const bx = offset.x + s.x * zoom + s.w * zoom - 15
-    const by = offset.y + s.y * zoom + 2
-    return mx >= bx && mx <= bx + 13 && my >= by && my <= by + 13
-  }
-
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return
     const rect = containerRef.current!.getBoundingClientRect()
@@ -736,13 +718,6 @@ export default function CanvasView({
       return
     }
     if (tool === 'slice') {
-      // 删除按钮优先
-      for (let i = slices.length - 1; i >= 0; i--) {
-        if (hitDeleteBadge(mx, my, slices[i])) {
-          onDeleteSlice(slices[i].id)
-          return
-        }
-      }
       const docStart = { x: (mx - offset.x) / zoom, y: (my - offset.y) / zoom }
       if (selectedSliceIds.size === 1) {
         const sel = slices.find((s) => selectedSliceIds.has(s.id))
@@ -797,10 +772,9 @@ export default function CanvasView({
         if (spaceActive) {
           el.style.cursor = panCursor
         } else if (tool === 'slice') {
-          const onBadge = slices.some((s) => hitDeleteBadge(mx, my, s))
           const sel = selectedSliceIds.size === 1 ? slices.find((s) => selectedSliceIds.has(s.id)) : undefined
           const h = sel ? hitHandle(mx, my, sel) : null
-          el.style.cursor = onBadge ? 'pointer' : h ? HANDLE_CURSORS[h] : toolCursor ?? fallbackCursor
+          el.style.cursor = h ? HANDLE_CURSORS[h] : toolCursor ?? fallbackCursor
         } else {
           el.style.cursor = toolCursor ?? fallbackCursor
         }
@@ -963,7 +937,14 @@ export default function CanvasView({
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
-    if (tool !== 'move' || !onLayerContext || !containerRef.current) return
+    if (!containerRef.current) return
+    if (tool === 'slice') {
+      const rect = containerRef.current.getBoundingClientRect()
+      const hit = hitSlice(e.clientX - rect.left, e.clientY - rect.top)
+      if (hit) onSliceContext?.(hit.id, e.clientX, e.clientY)
+      return
+    }
+    if (tool !== 'move' || !onLayerContext) return
     const rect = containerRef.current.getBoundingClientRect()
     const hit = hitLayer(e.clientX - rect.left, e.clientY - rect.top)
     if (hit) onLayerContext(hit, e.clientX, e.clientY)
