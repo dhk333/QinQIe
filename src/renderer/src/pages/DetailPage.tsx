@@ -1271,6 +1271,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             <>
               <span className="batch-label">
                 {t('共')} <b>{visibleLayerCount}</b> {t('个可见图层')}
+                {decoding ? ` · ${t('图层解析中…')}` : ''}
               </span>
               <button className="batch-mini" onClick={() => void handleTemplate()}>
                 {t('命名模板')}

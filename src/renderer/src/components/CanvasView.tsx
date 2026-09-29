@@ -580,7 +580,6 @@ export default function CanvasView({
     for (let i = all.length - 1; i >= 0; i--) {
       const layer = all[i]
       if (layer.children || layer.hidden || hiddenIds.has(layer.id)) continue
-      if (!canvasMap.has(layer.id)) continue
       if (
         dx >= layer.left &&
         dx <= layer.left + layer.width &&
@@ -590,7 +589,9 @@ export default function CanvasView({
         rectHits.push(layer)
       }
     }
-    // 优先命中不透明像素（容差随缩放变化，约 2 个屏幕像素）
+    // 优先命中不透明像素（容差随缩放变化，约 2 个屏幕像素）。
+    // 位图还没解码的图层（快速进入的预览期，以及文本/空图层）不参与像素命中，
+    // 但保留矩形命中资格：预览期也能正常选择，解码完成后像素级命中自动接管
     const r = Math.max(0, Math.ceil(2 / zoom))
     for (const layer of rectHits) {
       const c = canvasMap.get(layer.id)
