@@ -1356,7 +1356,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           </span>
           <span
             className={`zb${tool === 'slice' ? ' active' : ''}`}
-            title={t('切片工具 (S) — 拖拽画切片')}
+            title={t('切片工具 (S) — 拖拽画切片，自动贴边图层/切片边缘（Ctrl 暂时关闭）')}
             onClick={() => setTool('slice')}
           >
             <SliceIcon />

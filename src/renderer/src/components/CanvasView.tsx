@@ -138,6 +138,28 @@ function resizeRect(
   return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) }
 }
 
+/** 自动贴边：磁吸半径（屏幕 px）。按住 Ctrl/Meta 时暂时关闭 */
+const SNAP_PX = 6
+
+interface SnapTargets {
+  xs: number[]
+  ys: number[]
+}
+
+/** 目标集内离 v 最近且不超过容差的值 */
+function nearestTarget(v: number, targets: number[], tol: number): number | null {
+  let best: number | null = null
+  let dist = tol
+  for (const t of targets) {
+    const d = Math.abs(t - v)
+    if (d <= dist) {
+      dist = d
+      best = t
+    }
+  }
+  return best
+}
+
 export default function CanvasView({
   doc,
   tree,
@@ -171,6 +193,10 @@ export default function CanvasView({
   const [zoom, setZoom] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [drawingRect, setDrawingRect] = useState<DrawRect | null>(null)
+  /** 贴边参考线（文档坐标）：切片拖拽/缩放/移动中吸附生效的边 */
+  const [snapGuides, setSnapGuides] = useState<{ x: number[]; y: number[] } | null>(null)
+  /** 贴边目标集（文档坐标，拖拽开始时构建） */
+  const snapTargetsRef = useRef<SnapTargets | null>(null)
   /** 选择工具下已选中时，悬停的其它图层 id（用于中心距测量） */
   const [hoverId, setHoverId] = useState<number | null>(null)
   const lastFitDoc = useRef<string>('')
@@ -286,6 +312,35 @@ export default function CanvasView({
       boxCache.current.set(l, b)
     }
     return b
+  }
+
+  /** 自动贴边目标：文档边缘 + 已有切片边缘 + 可见图层的可见内容框（layerBox 自带缓存）。
+   *  拖拽开始时构建一次；excludeId 排除正在拖拽/缩放的切片自身的边缘，避免吸住原位 */
+  const buildSnapTargets = (excludeId?: string): SnapTargets => {
+    const xs = new Set<number>()
+    const ys = new Set<number>()
+    if (doc) {
+      xs.add(0)
+      xs.add(doc.width)
+      ys.add(0)
+      ys.add(doc.height)
+    }
+    for (const s of slices) {
+      if (s.id === excludeId) continue
+      xs.add(s.x)
+      xs.add(s.x + s.w)
+      ys.add(s.y)
+      ys.add(s.y + s.h)
+    }
+    for (const l of flattenLayers(tree)) {
+      if (l.children || l.hidden || hiddenIds.has(l.id) || l.width <= 0 || l.height <= 0) continue
+      const b = layerBox(l)
+      xs.add(b.left)
+      xs.add(b.left + b.width)
+      ys.add(b.top)
+      ys.add(b.top + b.height)
+    }
+    return { xs: [...xs].sort((a, b) => a - b), ys: [...ys].sort((a, b) => a - b) }
   }
 
   // 绘制
@@ -517,8 +572,30 @@ export default function CanvasView({
         ctx.strokeRect(x - 0.5, y - 0.5, drawingRect.w * zoom + 1, drawingRect.h * zoom + 1)
         ctx.setLineDash([])
       }
+      // 贴边参考线：吸附生效的边画通栏参考线（白晕 + 主题色，任意底色上都可见）
+      if (snapGuides) {
+        for (const gx of snapGuides.x) {
+          const x = Math.round(offset.x + gx * zoom) + 0.5
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+          ctx.lineWidth = 3
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, size.h); ctx.stroke()
+          ctx.strokeStyle = accent
+          ctx.lineWidth = 1
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, size.h); ctx.stroke()
+        }
+        for (const gy of snapGuides.y) {
+          const y = Math.round(offset.y + gy * zoom) + 0.5
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+          ctx.lineWidth = 3
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size.w, y); ctx.stroke()
+          ctx.strokeStyle = accent
+          ctx.lineWidth = 1
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size.w, y); ctx.stroke()
+        }
+        ctx.lineWidth = 1
+      }
     }
-  }, [doc, tree, rnodes, canvasMap, hiddenIds, preview, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId, uiPrefs])
+  }, [doc, tree, rnodes, canvasMap, hiddenIds, preview, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId, uiPrefs, snapGuides])
 
   // 滚轮缩放
   useEffect(() => {
@@ -672,6 +749,7 @@ export default function CanvasView({
         if (sel) {
           const h = hitHandle(mx, my, sel)
           if (h) {
+            snapTargetsRef.current = buildSnapTargets(sel.id)
             drag.current = {
               mode: 'resize', startX: mx, startY: my, originX: offset.x, originY: offset.y,
               moved: false, sliceId: sel.id, handle: h, docStart, origRect: { ...sel }
@@ -685,6 +763,7 @@ export default function CanvasView({
         if (e.altKey) {
           const dup = onDupSlice(hit.id)
           if (dup) {
+            snapTargetsRef.current = buildSnapTargets()
             drag.current = {
               mode: 'move', startX: mx, startY: my, originX: offset.x, originY: offset.y,
               moved: false, sliceId: dup.id, docStart, origRect: dup.rect
@@ -692,12 +771,14 @@ export default function CanvasView({
             return
           }
         }
+        snapTargetsRef.current = buildSnapTargets(hit.id)
         drag.current = {
           mode: 'move', startX: mx, startY: my, originX: offset.x, originY: offset.y,
           moved: false, sliceId: hit.id, docStart, origRect: { ...hit }
         }
         return
       }
+      snapTargetsRef.current = buildSnapTargets()
       drag.current = { mode: 'draw', startX: mx, startY: my, originX: offset.x, originY: offset.y, moved: false, docStart }
       return
     }
@@ -736,12 +817,27 @@ export default function CanvasView({
     }
     const docCur = { x: (mx - offset.x) / zoom, y: (my - offset.y) / zoom }
     if (d.mode === 'draw' && d.docStart) {
-      setDrawingRect({
-        x: Math.min(d.docStart.x, docCur.x),
-        y: Math.min(d.docStart.y, docCur.y),
-        w: Math.abs(docCur.x - d.docStart.x),
-        h: Math.abs(docCur.y - d.docStart.y)
-      })
+      const x1 = Math.min(d.docStart.x, docCur.x)
+      const x2 = Math.max(d.docStart.x, docCur.x)
+      const y1 = Math.min(d.docStart.y, docCur.y)
+      const y2 = Math.max(d.docStart.y, docCur.y)
+      const rect = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
+      // 四条边各自向最近目标磁吸；按住 Ctrl/Meta 暂时关闭贴边
+      const snap = e.ctrlKey || e.metaKey ? null : snapTargetsRef.current
+      if (snap) {
+        const tol = SNAP_PX / zoom
+        const guides = { x: [] as number[], y: [] as number[] }
+        const sx1 = nearestTarget(x1, snap.xs, tol)
+        if (sx1 !== null) { rect.x = sx1; rect.w = x2 - sx1; guides.x.push(sx1) }
+        const sx2 = nearestTarget(x2, snap.xs, tol)
+        if (sx2 !== null) { rect.w = sx2 - rect.x; guides.x.push(sx2) }
+        const sy1 = nearestTarget(y1, snap.ys, tol)
+        if (sy1 !== null) { rect.y = sy1; rect.h = y2 - sy1; guides.y.push(sy1) }
+        const sy2 = nearestTarget(y2, snap.ys, tol)
+        if (sy2 !== null) { rect.h = sy2 - rect.y; guides.y.push(sy2) }
+        setSnapGuides(guides.x.length || guides.y.length ? guides : null)
+      } else setSnapGuides(null)
+      setDrawingRect(rect)
       return
     }
     const dx = mx - d.startX
@@ -752,25 +848,82 @@ export default function CanvasView({
       return
     }
     if (d.mode === 'move' && d.origRect && d.moved && d.docStart) {
+      let x = d.origRect.x + (docCur.x - d.docStart.x)
+      let y = d.origRect.y + (docCur.y - d.docStart.y)
+      const snap = e.ctrlKey || e.metaKey ? null : snapTargetsRef.current
+      if (snap) {
+        const tol = SNAP_PX / zoom
+        const guides = { x: [] as number[], y: [] as number[] }
+        // 左/右两缘各自找吸附目标，取修正量小的那个（切片尺寸不变）
+        const sl = nearestTarget(x, snap.xs, tol)
+        const sr = nearestTarget(x + d.origRect.w, snap.xs, tol)
+        const dl = sl !== null ? Math.abs(sl - x) : Infinity
+        const dr = sr !== null ? Math.abs(sr - (x + d.origRect.w)) : Infinity
+        if (sl !== null || sr !== null) {
+          if (dl <= dr) { x = sl!; guides.x.push(sl!) }
+          else { x = sr! - d.origRect.w; guides.x.push(sr!) }
+        }
+        const st = nearestTarget(y, snap.ys, tol)
+        const sb = nearestTarget(y + d.origRect.h, snap.ys, tol)
+        const dt = st !== null ? Math.abs(st - y) : Infinity
+        const db = sb !== null ? Math.abs(sb - (y + d.origRect.h)) : Infinity
+        if (st !== null || sb !== null) {
+          if (dt <= db) { y = st!; guides.y.push(st!) }
+          else { y = sb! - d.origRect.h; guides.y.push(sb!) }
+        }
+        setSnapGuides(guides.x.length || guides.y.length ? guides : null)
+      } else setSnapGuides(null)
       onUpdateSlice(d.sliceId!, {
-        x: Math.round(d.origRect.x + (docCur.x - d.docStart.x)),
-        y: Math.round(d.origRect.y + (docCur.y - d.docStart.y)),
+        x: Math.round(x),
+        y: Math.round(y),
         w: d.origRect.w,
         h: d.origRect.h
       })
       return
     }
     if (d.mode === 'resize' && d.origRect && d.handle && d.docStart) {
-      onUpdateSlice(
-        d.sliceId!,
-        resizeRect(d.origRect, d.handle, docCur.x - d.docStart.x, docCur.y - d.docStart.y)
-      )
+      const rect = resizeRect(d.origRect, d.handle, docCur.x - d.docStart.x, docCur.y - d.docStart.y)
+      const snap = e.ctrlKey || e.metaKey ? null : snapTargetsRef.current
+      if (snap) {
+        const tol = SNAP_PX / zoom
+        const guides = { x: [] as number[], y: [] as number[] }
+        // 只吸附被拖动的那条边；吸附会小于最小尺寸时放弃
+        if (d.handle.includes('e') || d.handle.includes('w')) {
+          const east = d.handle.includes('e')
+          const fixed = east ? rect.x : rect.x + rect.w
+          const s = nearestTarget(east ? rect.x + rect.w : rect.x, snap.xs, tol)
+          if (s !== null && Math.abs(s - fixed) >= MIN_SLICE) {
+            if (east) rect.w = s - rect.x
+            else {
+              rect.w = fixed - s
+              rect.x = s
+            }
+            guides.x.push(s)
+          }
+        }
+        if (d.handle.includes('s') || d.handle.includes('n')) {
+          const south = d.handle.includes('s')
+          const fixed = south ? rect.y : rect.y + rect.h
+          const s = nearestTarget(south ? rect.y + rect.h : rect.y, snap.ys, tol)
+          if (s !== null && Math.abs(s - fixed) >= MIN_SLICE) {
+            if (south) rect.h = s - rect.y
+            else {
+              rect.h = fixed - s
+              rect.y = s
+            }
+            guides.y.push(s)
+          }
+        }
+        setSnapGuides(guides.x.length || guides.y.length ? guides : null)
+      } else setSnapGuides(null)
+      onUpdateSlice(d.sliceId!, rect)
     }
   }
 
   const onMouseUp = (e: React.MouseEvent) => {
     const d = drag.current
     drag.current = null
+    setSnapGuides(null)
     if (!d) return
     const rect = containerRef.current!.getBoundingClientRect()
     const mx = e.clientX - rect.left
