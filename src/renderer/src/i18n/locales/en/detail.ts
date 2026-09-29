@@ -49,10 +49,14 @@ export default {
   '导出 {n} 个文件': 'Export {n} files',
   // 画布工具栏 title
   '移动 / 选择图层 (V)': 'Move / select layers (V)',
-  '切片工具 (S) — 拖拽画切片': 'Slice tool (S) — drag to draw a slice',
+  '切片工具 (S) — 拖拽画切片，自动贴边图层/切片边缘（Ctrl 暂时关闭）': 'Slice tool (S) — drag to draw a slice; edges snap to layers/slices (hold Ctrl to disable)',
   '取色器 (I) — 点击画布取色并复制': 'Picker (I) — click the canvas to copy a color',
   '抓手 (H) — 拖拽平移': 'Hand (H) — drag to pan',
   '显示 / 隐藏切片': 'Show / hide slices',
+  // 切片右键菜单与选项弹窗
+  '编辑切片选项…': 'Edit slice options…',
+  '删除切片': 'Delete slice',
+  '切片选项': 'Slice Options',
   '缩小': 'Zoom out',
   '放大': 'Zoom in',
   '适应画布 (Shift+1)': 'Zoom to fit (Shift+1)',

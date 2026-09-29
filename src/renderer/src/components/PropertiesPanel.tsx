@@ -7,7 +7,7 @@ import { setUiPrefs, useUiPrefs } from '@/lib/uiPrefs'
 import { indexRNodes, measureLayerContent, renderLayerCanvas, type LayerBitmap } from '@/lib/psd'
 import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
-import { CheckIcon, ChevronRightIcon, CopyIcon, LinkIcon, UndoIcon } from './icons'
+import { CaretDownIcon, CheckIcon, ChevronRightIcon, CopyIcon, LinkIcon, UndoIcon } from './icons'
 import Slider from './Slider'
 
 interface Props {
@@ -106,6 +106,51 @@ function optCls(on: boolean): string {
       ? 'border-accent bg-accent-dim text-txt'
       : 'border-border bg-panel-2 text-txt-2 hover:border-border-light'
   }`
+}
+
+/** 下拉选择：触发器显示当前值，弹出面板放选项。外点关闭（mousedown 捕获），
+ *  选项通过 children(close) 在选中后自行收起 */
+function Dropdown({
+  label,
+  panelClass = 'w-40',
+  children
+}: {
+  label: React.ReactNode
+  panelClass?: string
+  children: (close: () => void) => React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close, true)
+    return () => document.removeEventListener('mousedown', close, true)
+  }, [open])
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[12px] text-txt transition-colors hover:border-border-light"
+      >
+        {label}
+        <CaretDownIcon
+          className={`h-3 w-3 shrink-0 text-txt-3 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && (
+        <div
+          className={`absolute left-0 top-full z-30 mt-1 rounded-lg border border-border bg-panel p-1.5 shadow-lg ${panelClass}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -847,14 +892,27 @@ export default function PropertiesPanel({
       )}
 
       <Section title="CSS">
-        <div className="mb-2 flex items-center gap-1.5">
-          {(['px', 'rem', 'vw'] as CssUnit[]).map((u) => (
-            <button key={u} onClick={() => setCssUnit(u)} className={optCls(cssUnits.unit === u)}>
-              {u}
-            </button>
-          ))}
+        <div className="mb-2 flex items-center gap-2">
+          <Dropdown panelClass="w-[104px]" label={<span className="font-mono">{cssUnits.unit}</span>}>
+            {(close) => (
+              <div className="flex gap-1.5">
+                {(['px', 'rem', 'vw'] as CssUnit[]).map((u) => (
+                  <button
+                    key={u}
+                    onClick={() => {
+                      setCssUnit(u)
+                      close()
+                    }}
+                    className={optCls(cssUnits.unit === u)}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Dropdown>
           {cssUnits.unit !== 'px' && (
-            <span className="ml-auto font-mono text-[10.5px] text-txt-3">
+            <span className="font-mono text-[10.5px] text-txt-3">
               {cssUnits.unit === 'rem'
                 ? `1rem = ${cssUnits.remBase}px`
                 : `100vw = ${doc?.width ?? cssUnits.vwBase}px`}
@@ -884,41 +942,52 @@ export default function PropertiesPanel({
         onToggle={() => setExportOpen((v) => !v)}
         summary={exportSummary}
       >
-        <div className="mb-2.5 flex gap-1.5">
-          {(
-            [
-              ['png', 'PNG'],
-              ['jpeg', 'JPG'],
-              ['webp', 'WebP']
-            ] as [ExportFormat, string][]
-          ).map(([f, label]) => (
-            <button key={f} onClick={() => setFormat(f)} className={optCls(format === f)}>
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="mb-2.5 flex gap-1.5">
-          {[1, 2, 3].map((s) => (
-            <button key={s} onClick={() => setScale(s)} className={optCls(scale === s)}>
-              @{s}x
-            </button>
-          ))}
-        </div>
-        {format !== 'png' && (
-          <div className="mb-2.5 flex items-center gap-2">
-            <span className="text-[11px] text-txt-3">{t('质量')}</span>
-            <Slider
-              min={0.5}
-              max={1}
-              step={0.01}
-              value={quality}
-              onChange={setQuality}
-            />
-            <b className="w-9 shrink-0 text-right font-mono text-[11px] text-txt-2">
-              {Math.round(quality * 100)}%
-            </b>
-          </div>
-        )}
+        <Dropdown
+          panelClass="w-40"
+          label={
+            <span className="font-medium">
+              {{ png: 'PNG', jpeg: 'JPG', webp: 'WebP' }[format]} · @{scale}x
+            </span>
+          }
+        >
+          {(close) => (
+            <div>
+              <div className="mb-1.5 flex gap-1.5">
+                {(
+                  [
+                    ['png', 'PNG'],
+                    ['jpeg', 'JPG'],
+                    ['webp', 'WebP']
+                  ] as [ExportFormat, string][]
+                ).map(([f, label]) => (
+                  <button
+                    key={f}
+                    onClick={() => setFormat(f)}
+                    className={optCls(format === f)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                {[1, 2, 3].map((s) => (
+                  <button key={s} onClick={() => setScale(s)} className={optCls(scale === s)}>
+                    @{s}x
+                  </button>
+                ))}
+              </div>
+              {format !== 'png' && (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="shrink-0 text-[11px] text-txt-3">{t('质量')}</span>
+                  <Slider min={0.5} max={1} step={0.01} value={quality} onChange={setQuality} />
+                  <b className="w-9 shrink-0 text-right font-mono text-[11px] text-txt-2">
+                    {Math.round(quality * 100)}%
+                  </b>
+                </div>
+              )}
+            </div>
+          )}
+        </Dropdown>
 
         <button
           type="button"

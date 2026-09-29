@@ -28,6 +28,7 @@ import CanvasView, {
   type CanvasViewport
 } from '@/components/CanvasView'
 import ContextMenu from '@/components/ContextMenu'
+import SliceOptionsModal from '@/components/SliceOptionsModal'
 import Slider from '@/components/Slider'
 import AppLogo from '@/components/AppLogo'
 import PropertiesPanel from '@/components/PropertiesPanel'
@@ -205,6 +206,9 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const [tool, setTool] = useState<CanvasTool>('move')
   const [slices, setSlicesRaw] = useState<DocSlice[]>(() => psd.slices ?? [])
   const [selectedSliceIds, setSelectedSliceIds] = useState<Set<string>>(new Set())
+  /** 切片右键菜单与「切片选项」弹窗（sliceEditId 指向正在编辑的切片） */
+  const [sliceMenu, setSliceMenu] = useState<{ x: number; y: number; sliceId: string } | null>(null)
+  const [sliceEditId, setSliceEditId] = useState<string | null>(null)
   const [showSlices, setShowSlices] = useState(true)
   const sliceSeq = useRef(1)
   // 统一撤销栈：切片与图层编辑按改动时间线共用一组 past/future，直接存改动前后快照
@@ -857,6 +861,15 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     ]
   })()
 
+  // 切片右键菜单：编辑选项 / 删除。删除走已选中集合（右键已先行单选/保持多选）
+  const sliceMenuItems = sliceMenu
+    ? [
+        { label: t('编辑切片选项…'), onClick: () => setSliceEditId(sliceMenu.sliceId) },
+        {},
+        { label: t('删除切片'), danger: true, onClick: () => deleteSelectedSlices() }
+      ]
+    : []
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -1196,6 +1209,11 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
               return next
             })
           }}
+          onSliceContext={(sliceId, cx, cy) => {
+            // 右键未选中的切片先单选它；已在多选里则保持整组选择
+            setSelectedSliceIds((prev) => (prev.has(sliceId) ? prev : new Set([sliceId])))
+            setSliceMenu({ x: cx, y: cy, sliceId })
+          }}
         />
 
         <div className="batch-bar" id="batch-bar">
@@ -1356,7 +1374,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           </span>
           <span
             className={`zb${tool === 'slice' ? ' active' : ''}`}
-            title={t('切片工具 (S) — 拖拽画切片')}
+            title={t('切片工具 (S) — 拖拽画切片，自动贴边图层/切片边缘（Ctrl 暂时关闭）')}
             onClick={() => setTool('slice')}
           >
             <SliceIcon />
@@ -1481,6 +1499,28 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         />
       </aside>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
+      {sliceMenu && (
+        <ContextMenu
+          x={sliceMenu.x}
+          y={sliceMenu.y}
+          items={sliceMenuItems}
+          onClose={() => setSliceMenu(null)}
+        />
+      )}
+      {sliceEditId &&
+        (() => {
+          const s = slices.find((x) => x.id === sliceEditId)
+          return s ? (
+            <SliceOptionsModal
+              slice={s}
+              onClose={() => setSliceEditId(null)}
+              onSubmit={(patch) => {
+                setSlices((prev) => prev.map((x) => (x.id === sliceEditId ? { ...x, ...patch } : x)))
+                setSliceEditId(null)
+              }}
+            />
+          ) : null
+        })()}
     </div>
   )
 }
