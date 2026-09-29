@@ -16,6 +16,7 @@ import SettingsPage from '@/pages/SettingsPage'
 import ShortcutsOverlay from '@/components/ShortcutsOverlay'
 import OnboardingTour from '@/components/OnboardingTour'
 import CloseAskModal from '@/components/CloseAskModal'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import AppLogo from '@/components/AppLogo'
 import { useT } from '@/i18n/core'
 import { BackIcon, CaretDownIcon, GearIcon, PlusIcon, UploadIcon } from '@/components/icons'
@@ -301,6 +302,7 @@ export default function App() {
           {t('加载中…')}
         </div>
       ) : (
+        <ErrorBoundary>
         <div className="page page-enter" key={hash} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           {route.name === 'home' && (
             <HomePage
@@ -357,6 +359,7 @@ export default function App() {
             <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--txt-3)' }}>{t('项目不存在')}</div>
           )}
         </div>
+        </ErrorBoundary>
       )}
 
       <OnboardingTour projects={projects ?? []} />

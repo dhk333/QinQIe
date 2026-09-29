@@ -4,13 +4,15 @@ import {
   parsePsd,
   parsePsdFallback,
   fetchPsdFile,
-  materializeBitmaps,
+  materializePixels,
   flattenLayers,
   buildCompositeCanvas,
   renderLayerCanvas,
+  adoptLayerIds,
   type LayerBitmap
 } from '@/lib/psd'
-import { decodeLayersInWorker, WorkerDecodeError } from '@/lib/psdWorker'
+import { decodeLayersInWorker, WorkerDecodeError, WorkerCancelledError } from '@/lib/psdWorker'
+import { readPsdCache, writePsdCache } from '@/lib/psdCache'
 import { applyLayerEdits, editBaseName, patchEdit, type LayerEdits } from '@/lib/layerEdits'
 import { exportCanvasBytes } from '@/lib/export'
 import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
@@ -53,6 +55,16 @@ type HistEntry =
   | { type: 'slice'; before: DocSlice[]; after: DocSlice[] }
   | { type: 'edit'; before: LayerEdits; after: LayerEdits }
 
+/** 一次全量解码请求：isDead 绑定发起它的那轮加载的生命周期，
+ *  StrictMode 双挂载或换文件后，先一轮的迟到结果整包丢弃，绝不写进新一轮的状态 */
+interface DecodeRequest {
+  buffer: Uint8Array
+  name: string
+  tree: PsdLayer[]
+  path: string
+  isDead: () => boolean
+}
+
 function findInTree(nodes: PsdLayer[], id: number): PsdLayer | null {
   for (const n of nodes) {
     if (n.id === id) return n
@@ -72,25 +84,24 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null)
   const [rawRnodes, setRnodes] = useState<RNode[]>([])
   const canvasMapRef = useRef<Map<number, LayerBitmap>>(new Map())
-  /** 待执行的第二遍全量解码任务（入场动画点亮后交给 Worker 执行） */
-  const decodeJobRef = useRef<{
-    buffer: Uint8Array
-    name: string
-    tree: PsdLayer[]
-    path: string
-  } | null>(null)
+  /** 解码任务句柄：换文件/离开页面时终止 Worker，不再为已抛弃的文档烧解码 */
+  const decodeCancelRef = useRef<(() => void) | null>(null)
   const [hiddenIds, setHiddenIds] = useState<Set<number>>(new Set())
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const anchorRef = useRef<number | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; ids: number[] } | null>(null)
   const [loading, setLoading] = useState(true)
-  /** 加载进度：loadTarget 是里程碑下限，loadPct 按「恒定慢速上升」逐帧逼近它。
-   *  条和数字共用同一个 loadPct，永不错位；未到终点前始终保持可见的移动，
-   *  不会在某档停住等下一档——主线程被解码卡住时整屏本就冻结，恢复后继续爬。 */
+  /** 加载进度：loadTarget 是里程碑下限，loadPct 逐帧逼近它。
+   *  内容就绪（contentReady）前按里程碑爬行，就绪后 200%/s 冲刺收尾——
+   *  真实工作多快，加载屏就多快结束，不再人为垫底数秒。 */
   const [loadTarget, setLoadTarget] = useState(0)
   const [loadPct, setLoadPct] = useState(0)
-  // 有内嵌合成图预览时不再等解码：先揭示界面，解码在入场动画点亮后台补
+  const loadPctRef = useRef(0)
+  useEffect(() => {
+    loadPctRef.current = loadPct
+  }, [loadPct])
+  // 有内嵌合成图预览时不再等解码：先揭示界面，解码转入后台
   const contentReady = !loading && (!decoding || !!previewCanvas)
   useEffect(() => {
     if (!contentReady) return
@@ -103,10 +114,9 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       const dt = Math.min(0.25, (now - last) / 1000)
       last = now
       setLoadPct((p) => {
-        // 未到下一档里程碑时保持 2%/s 蠕行，永不停死；冲刺里程碑时用远快近慢速度
         const gap = loadTarget - p
         if (gap > 0.05) {
-          const speed = gap > 30 ? 26 : gap > 10 ? 14 : 8
+          const speed = contentReady ? 200 : gap > 30 ? 26 : gap > 10 ? 14 : 8
           return Math.min(loadTarget, p + speed * dt)
         }
         // 终点档只许涨不许跌：旧实现在 (99.95,100) 区间会把 p 重置回 99，
@@ -114,14 +124,24 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         if (loadTarget >= 100) return Math.min(100, p)
         return p >= 99 ? p : Math.min(99, p + 2 * dt)
       })
+      // 爬满后停帧，不再空转；新一轮加载把 loadTarget 打回低位时由依赖变化重启
+      if (loadTarget >= 100 && loadPctRef.current >= 100) return
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [loadTarget])
+  }, [loadTarget, contentReady])
   /** 加载完成后加载层不立即卸载：先播完渐出动画再由 onAnimationEnd 移除 */
   const [loaderGone, setLoaderGone] = useState(false)
-  /** 出屏许可：进度条缓动真正爬满后才允许加载层渐出，避免半途消失 */
+  /** 快开免加载屏：contentReady 在 250ms 内到来就根本不显示加载屏，
+   *  直接进内容与入场动画；超过才亮出进度条，之后照常冲刺收尾 */
+  const [loaderShown, setLoaderShown] = useState(false)
+  useEffect(() => {
+    if (contentReady) return
+    const t = setTimeout(() => setLoaderShown(true), 250)
+    return () => clearTimeout(t)
+  }, [contentReady])
+  /** 出屏许可：进度条冲刺爬满后才允许加载层渐出，避免半途消失 */
   const [exitArmed, setExitArmed] = useState(false)
   useEffect(() => {
     if (!contentReady) {
@@ -129,14 +149,16 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       setExitArmed(false)
       return
     }
-    if (loadPct >= 99.6) {
+    // 加载屏没登场过（快开）：进度条无需收尾，直接放行
+    if (!loaderShown || loadPct >= 99.6) {
+      setLoaderGone(!loaderShown)
       setExitArmed(true)
       return
     }
-    // 兜底：极端情况下最多再等 2s 也必须放行
+    // 兜底：极端情况下（如 rAF 因窗口不可见停摆）最多再等 2s 也必须放行
     const t = setTimeout(() => setExitArmed(true), 2000)
     return () => clearTimeout(t)
-  }, [contentReady, loadPct])
+  }, [contentReady, loaderShown, loadPct])
   /** 入场许可：布局先在加载层遮挡下挂载并完成首轮合成（重活、会卡主线程），
    *  之后才同时点亮加载层渐出与面板/画布入场动画，保证动画全程可见 */
   const [entered, setEntered] = useState(false)
@@ -367,95 +389,47 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     return () => document.removeEventListener('click', close)
   }, [])
 
-  // 加载 PSD
-  useEffect(() => {
-    let alive = true
-    setLoading(true)
-    setLoadTarget(5)
-    fetchPsdFile(psd.path)
-      .then(async ({ name, buffer }) => {
-        if (!alive) return
-        setLoadTarget(30)
-        let parsed
-        let usedFallback = false
-        try {
-          // 两阶段加载：先只做结构解析（~50ms）让图层树/面板立即可用
-          parsed = parsePsd(buffer, name, true)
-        } catch {
-          // 主解析器失败时使用 @webtoon/psd 兜底（支持 ZIP 压缩等），其位图已逐层渲染
-          usedFallback = true
-          parsed = await parsePsdFallback(buffer, name)
-          toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
-        }
-        canvasMapRef.current = parsed.canvasMap
-        setRnodes(parsed.rnodes)
-        setDoc(parsed.doc)
-        setTree(parsed.tree)
-        setHiddenIds(new Set())
-        setSelectedId(null)
-        setSelectedIds(new Set())
-        // 两阶段：逐层位图还没解出来时，先拿内嵌合成图占位显示
-        setPreviewCanvas(parsed.canvasMap.size === 0 ? (parsed.composite ?? null) : null)
-        // 重新进入时恢复上次持久化的切片，序号接着排
-        const restored = psd.slices ?? []
-        setSlicesRaw(restored)
-        setSelectedSliceIds(new Set())
-        editBaseRef.current = null
-        editsBaseRef.current = null
-        histRef.current = { past: [], future: [] }
-        sliceSeq.current = restored.reduce((m, s) => Math.max(m, Number(s.no) || 0), 0) + 1
-        // 图层编辑同样从项目 JSON 恢复；引用对齐避免挂载即触发一次无谓保存
-        const restoredEdits = psd.layerEdits ?? {}
-        editSavedRef.current = restoredEdits
-        setLayerEditsRaw(restoredEdits)
-        setLoadTarget(60)
-        setLoading(false)
-        // 结构阶段跳过了全部位图（canvasMap 为空）时登记第二遍全量解码任务：
-        // 等入场动画点亮后再交给 Worker，解码整段离开主线程
-        if (parsed.canvasMap.size === 0) {
-          setDecoding(true)
-          setLoadTarget(88)
-          decodeJobRef.current = { buffer, name, tree: parsed.tree, path: psd.path }
-        }
-      })
-      .catch(() => {
-        if (!alive) return
-        toast(t('加载 PSD 失败'), 'error')
-        setLoading(false)
-      })
-    return () => {
-      alive = false
-      decodeJobRef.current = null
+  // 全量解码交给 Worker：主线程全程不阻塞。Worker 不占主线程，fetch/解析一结束
+  // 就启动，与加载动画并行跑；req.isDead 绑定发起本轮加载的生命周期，
+  // StrictMode 双挂载 / 换文件后，先一轮的迟到结果一律丢弃
+  const startDecode = useCallback((req: DecodeRequest) => {
+    const { result, cancel } = decodeLayersInWorker(req.buffer, req.tree)
+    decodeCancelRef.current = cancel
+    const drop = () => {
+      if (decodeCancelRef.current === cancel) decodeCancelRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [psd.path])
-
-  // 入场动画点亮后把登记的全量解码交给 Worker：主线程全程不阻塞。
-  // entered 依赖 rAF，窗口不可见时 rAF 停摆，故带 2.5s 定时器兜底，避免解码永挂
-  const startDecode = useCallback(() => {
-    const job = decodeJobRef.current
-    if (!job) return
-    decodeJobRef.current = null
-    setTimeout(async () => {
-      try {
-        const decoded = await decodeLayersInWorker(job.buffer, job.tree)
-        // ImageBitmap 只是跨线程载体，浏览器会很快丢弃其解码缓存 → 立刻固化成 DOM canvas
-        materializeBitmaps(decoded.rnodes, decoded.canvasMap)
-        canvasMapRef.current = decoded.canvasMap
+    result
+      .then(async (decoded) => {
+        if (req.isDead()) return drop()
+        drop()
+        // Worker 传回的是原始像素字节（惰性数据，不会像 ImageBitmap 那样衰减）：
+        // 逐条固化成 DOM canvas，按像素量分帧，解码完成瞬间不再冻结主线程
+        const canvasMap = await materializePixels(
+          decoded.rnodes,
+          decoded.canvasEntries,
+          decoded.maskEntries,
+          req.isDead
+        )
+        if (!canvasMap || req.isDead()) return
+        canvasMapRef.current = canvasMap
         setRnodes(decoded.rnodes)
         setPreviewCanvas(null)
         setLoadTarget(100)
         setDecoding(false)
-      } catch (e) {
+      })
+      .catch(async (e: unknown) => {
+        // 主动取消或本轮加载已作废：静默收场，不走备用解析器
+        if (req.isDead() || e instanceof WorkerCancelledError) return drop()
+        drop()
         // ag-psd 能读结构但位图/蒙版数据解不动（如 Invalid mask size），
         // 整文档交给备用解析器重建树+位图，节点 id 变了需重置选中态。
         // buffer 已转移进 Worker：解码失败会随错误回传；Worker 整体崩溃拿不回，按原路径重读
         try {
           const returned = e instanceof WorkerDecodeError ? e.returnedBuffer : undefined
-          const buf = returned
-            ? new Uint8Array(returned)
-            : (await fetchPsdFile(job.path)).buffer
-          const fb = await parsePsdFallback(buf, job.name)
+          const buf = returned ? new Uint8Array(returned) : (await fetchPsdFile(req.path)).buffer
+          if (req.isDead()) return
+          const fb = await parsePsdFallback(buf, req.name)
+          if (req.isDead()) return
           canvasMapRef.current = fb.canvasMap
           setRnodes(fb.rnodes)
           setDoc(fb.doc)
@@ -466,23 +440,110 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           setPreviewCanvas(null)
           toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
         } catch {
+          if (req.isDead()) return
           toast(t('图层位图解码失败'), 'error')
         }
         setLoadTarget(100)
         setDecoding(false)
-      }
-    }, 80)
+      })
   }, [toast, t])
 
+  // 加载 PSD：结构缓存命中则跳过主线程解析（预览用缓存合成图）；未命中走两阶段——
+  // 先只做结构解析（~50ms）让图层树/面板立即可用，位图解码随后立刻交给 Worker
   useEffect(() => {
-    if (!decoding) return
-    if (entered) {
-      startDecode()
-      return
+    // 存活标志用局部变量而不是 ref：StrictMode 双挂载时第一轮的链路必须随 cleanup
+    // 一起作废，不能被第二轮挂载「复活」（否则同一文件会被两条链并行解析两遍）
+    let alive = true
+    setLoading(true)
+    setLoadPct(0)
+    setLoaderShown(false)
+    setLoadTarget(5)
+    const resetSelection = () => {
+      setHiddenIds(new Set())
+      setSelectedId(null)
+      setSelectedIds(new Set())
     }
-    const fb = window.setTimeout(startDecode, 2500)
-    return () => window.clearTimeout(fb)
-  }, [decoding, entered, startDecode])
+    // 恢复上次持久化的切片与图层编辑；引用对齐避免挂载即触发一次无谓保存
+    const restoreSessionState = () => {
+      const restored = psd.slices ?? []
+      setSlicesRaw(restored)
+      setSelectedSliceIds(new Set())
+      editBaseRef.current = null
+      editsBaseRef.current = null
+      histRef.current = { past: [], future: [] }
+      sliceSeq.current = restored.reduce((m, s) => Math.max(m, Number(s.no) || 0), 0) + 1
+      const restoredEdits = psd.layerEdits ?? {}
+      editSavedRef.current = restoredEdits
+      setLayerEditsRaw(restoredEdits)
+    }
+    ;(async () => {
+      try {
+        // ① 结构缓存：主进程 stat 换 key + 读小 JSON，命中则主线程零解析
+        const cached = await readPsdCache(psd.path)
+        if (!alive) return
+        if (cached) {
+          adoptLayerIds(cached.entry.tree)
+          setDoc(cached.entry.doc)
+          setTree(cached.entry.tree)
+          setRnodes(cached.entry.rnodes)
+          setPreviewCanvas(cached.preview)
+          resetSelection()
+          restoreSessionState()
+          setLoading(false)
+          setLoadTarget(88)
+          setDecoding(true)
+          const { name, buffer } = await fetchPsdFile(psd.path)
+          if (!alive) return
+          startDecode({ buffer, name, tree: cached.entry.tree, path: psd.path, isDead: () => !alive })
+          return
+        }
+        // ② 缓存未命中：流式读文件 + 结构解析（内嵌合成图先顶预览）
+        const { name, buffer } = await fetchPsdFile(psd.path)
+        if (!alive) return
+        setLoadTarget(30)
+        let parsed
+        try {
+          parsed = parsePsd(buffer, name, true)
+        } catch {
+          // 主解析器失败时使用 @webtoon/psd 兜底（支持 ZIP 压缩等），其位图已逐层渲染
+          parsed = await parsePsdFallback(buffer, name)
+          toast(t('主解析器不支持该文件，已使用备用解析器'), 'warning')
+        }
+        if (!alive) return
+        canvasMapRef.current = parsed.canvasMap
+        setRnodes(parsed.rnodes)
+        setDoc(parsed.doc)
+        setTree(parsed.tree)
+        resetSelection()
+        // 两阶段：逐层位图还没解出来时，先拿内嵌合成图占位显示
+        setPreviewCanvas(parsed.canvasMap.size === 0 ? (parsed.composite ?? null) : null)
+        restoreSessionState()
+        setLoadTarget(60)
+        setLoading(false)
+        // 解析成功即登记缓存（后台写，避开打开瞬间）；备用解析器没有内嵌合成图，不写
+        if (parsed.composite) {
+          writePsdCache(psd.path, parsed.doc, parsed.tree, parsed.rnodes, parsed.composite)
+        }
+        // 结构阶段跳过了全部位图（canvasMap 为空）时立刻把全量解码交给 Worker
+        if (parsed.canvasMap.size === 0) {
+          setDecoding(true)
+          setLoadTarget(88)
+          startDecode({ buffer, name, tree: parsed.tree, path: psd.path, isDead: () => !alive })
+        }
+      } catch {
+        if (!alive) return
+        setDecoding(false)
+        toast(t('加载 PSD 失败'), 'error')
+        setLoading(false)
+      }
+    })()
+    return () => {
+      alive = false
+      decodeCancelRef.current?.()
+      decodeCancelRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [psd.path])
 
   const selectedLayer = selectedId != null ? findInTree(tree, selectedId) : null
 
@@ -1050,6 +1111,10 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   )
 
   if (!contentReady || !exitArmed) {
+    // 快开：加载屏没登场过就不画，避免进度条闪一下的毛刺
+    if (!loaderShown) {
+      return <div style={{ position: 'relative', display: 'flex', flex: 1, minHeight: 0 }} />
+    }
     return (
       <div
         style={{ position: 'relative', display: 'flex', flex: 1, minHeight: 0 }}
@@ -1062,7 +1127,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   return (
     <div
       id="page-detail"
-      className={`detail${entered ? ' entered' : ''}`}
+      className={`detail${entered ? ' entered' : ''}${loaderShown ? '' : ' instant'}`}
       style={{ position: 'relative', display: 'flex', flex: 1, minHeight: 0 }}
     >
       {!loaderGone && (
@@ -1206,6 +1271,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             <>
               <span className="batch-label">
                 {t('共')} <b>{visibleLayerCount}</b> {t('个可见图层')}
+                {decoding ? ` · ${t('图层解析中…')}` : ''}
               </span>
               <button className="batch-mini" onClick={() => void handleTemplate()}>
                 {t('命名模板')}

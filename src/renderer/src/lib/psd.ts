@@ -1,7 +1,7 @@
 import { readPsd, type Layer, type Psd } from 'ag-psd'
 import type { PsdDoc, PsdLayer } from '@/types'
 import { compositeDocument, renderIsolated, type Env, type RNode } from './compositor'
-import { toRNodes, type LayerBitmap } from './psdDecode'
+import { toRNodes, type LayerBitmap, type PixelEntry } from './psdDecode'
 
 export type { LayerBitmap } from './psdDecode'
 export { decodeLayerCanvases } from './psdDecode'
@@ -165,7 +165,8 @@ export function readLayerPixels(
 ): ImageData | null {
   if (img instanceof HTMLCanvasElement) {
     try {
-      return img.getContext('2d')?.getImageData(x, y, w, h) ?? null
+      // willReadFrequently：首次建上下文就固定 CPU 后端，后续 4 条边缘带的 getImageData 不走 GPU 回读
+      return img.getContext('2d', { willReadFrequently: true })?.getImageData(x, y, w, h) ?? null
     } catch {
       return null
     }
@@ -314,48 +315,75 @@ function computeLayerContent(img: LayerBitmap): LayerContent | null {
 }
 
 /**
- * Worker 回传的 ImageBitmap 只能当临时载体：实测其解码缓存会在数秒内被丢弃，
- * 位图变成全透明但 width/height 不变。收到后立刻逐张拷成 DOM canvas 作为长期
- * 像素存储（同一实例只拷一次，保持 rnode 与 canvasMap 的引用一致）。
- * 每张位图先收齐全部引用槽位，拷完立即 close：大文档像素总量可达 GB 级，
- * 若像旧实现那样全部拷完再统一 close，bitmap+canvas 两份像素会同时存在，峰值翻倍直接把渲染进程压崩。
+ * Worker 回传的原始像素 → DOM canvas。带渲染上下文的 OffscreenCanvas 不可
+ * transfer/clone，而 ImageBitmap 的解码缓存实测数秒内会被丢弃（位图变全透明但
+ * width/height 不变）——所以 Worker 直接读出原始字节，这里逐条 putImageData 固化。
+ * 原始字节是惰性数据，分帧让出无论多久都不会拷出透明层；每约 4M 像素（16MB）
+ * 让出主线程一拍，解码完成瞬间不再冻结。isDead 时中止并返回 null（页面已离开）。
  */
-export function materializeBitmaps(
+export async function materializePixels(
   rnodes: RNode[],
-  canvasMap: Map<number, LayerBitmap>
-): void {
-  const slots = new Map<ImageBitmap, ((c: HTMLCanvasElement) => void)[]>()
-  const add = (b: ImageBitmap, set: (c: HTMLCanvasElement) => void): void => {
-    const list = slots.get(b)
-    if (list) list.push(set)
-    else slots.set(b, [set])
+  canvasEntries: [number, PixelEntry][],
+  maskEntries: [number, PixelEntry][],
+  isDead?: () => boolean
+): Promise<Map<number, LayerBitmap> | null> {
+  const CHUNK_PIXELS = 1 << 22
+  let chunk = 0
+  const toCanvas = (e: PixelEntry): HTMLCanvasElement => {
+    const c = document.createElement('canvas')
+    c.width = e.w
+    c.height = e.h
+    // 与 browserEnv 同理：图层画布之后会被 measureLayerContent/取色反复 getImageData，
+    // 建上下文时就固定 CPU 后端，避免每次读像素走 GPU 回读
+    const ctx = c.getContext('2d', { willReadFrequently: true })!
+    // 原始字节直写：与旧 ImageBitmap drawImage 逐像素等价，且无插值/衰减变量
+    const img = ctx.createImageData(e.w, e.h)
+    img.data.set(e.data)
+    ctx.putImageData(img, 0, 0)
+    return c
   }
+  const canvasMap = new Map<number, LayerBitmap>()
+  const maskMap = new Map<number, LayerBitmap>()
+  const build = async (
+    entries: [number, PixelEntry][],
+    into: Map<number, LayerBitmap>
+  ): Promise<boolean> => {
+    for (const [id, e] of entries) {
+      if (isDead?.()) return false
+      into.set(id, toCanvas(e))
+      chunk += e.w * e.h
+      if (chunk >= CHUNK_PIXELS) {
+        chunk = 0
+        await new Promise((r) => setTimeout(r, 0))
+      }
+    }
+    return true
+  }
+  if (!(await build(canvasEntries, canvasMap))) return null
+  if (!(await build(maskEntries, maskMap))) return null
+  // Worker 侧回传的 rnodes 已把画布引用清空，这里按 id 回填，
+  // 保持 rnode 与 canvasMap 引用同一实例的策略不变
   const walk = (ns: RNode[]): void => {
     for (const n of ns) {
-      if (n.canvas instanceof ImageBitmap) {
-        const b = n.canvas
-        add(b, (c) => (n.canvas = c))
-      }
-      const mb = n.mask?.canvas
-      if (mb instanceof ImageBitmap) {
-        const m = n.mask!
-        add(mb, (c) => (m.canvas = c))
-      }
+      if (canvasMap.has(n.id)) n.canvas = canvasMap.get(n.id) ?? null
+      if (n.mask && maskMap.has(n.id)) n.mask.canvas = maskMap.get(n.id) ?? null
       if (n.children) walk(n.children)
     }
   }
   walk(rnodes)
-  for (const [id, b] of canvasMap) {
-    if (b instanceof ImageBitmap) add(b, (c) => void canvasMap.set(id, c))
+  return canvasMap
+}
+
+/**
+ * 缓存载入的图层树沿用了历史节点 id：把模块级 nextId 推到其上，
+ * 避免同会话内后续解析（备用解析器等）分配出与缓存树冲突的 id。
+ */
+export function adoptLayerIds(nodes: PsdLayer[]): void {
+  const walk = (n: PsdLayer): void => {
+    if (n.id >= nextId) nextId = n.id + 1
+    n.children?.forEach(walk)
   }
-  for (const [b, sets] of slots) {
-    const c = document.createElement('canvas')
-    c.width = b.width
-    c.height = b.height
-    c.getContext('2d')?.drawImage(b, 0, 0)
-    for (const set of sets) set(c)
-    b.close()
-  }
+  nodes.forEach(walk)
 }
 
 export function parsePsd(buffer: Uint8Array, fileName: string, structureOnly = false): ParseResult {
