@@ -551,10 +551,18 @@ interface ImportResult {
 }
 
 // 导入 PSD：只读合成图生成缩略图并缓存（不解析图层，列表页秒开）
-ipcMain.handle('psd:import', async (_e, paths: string[], maxThumbBytes?: number): Promise<ImportResult[]> => {
+// 逐个文件向渲染层回报进度，否则多文件上传时弹窗只能停在首帧等最后一个结果
+ipcMain.handle('psd:import', async (evt, paths: string[], maxThumbBytes?: number): Promise<ImportResult[]> => {
   const results: ImportResult[] = []
   const thumbDir = join(app.getPath('userData'), 'thumbnails')
-  for (const filePath of paths) {
+  const total = paths.length
+  const emit = (index: number, name: string, state: 'working' | 'ok' | 'fail'): void => {
+    const wc = evt.sender
+    if (!wc.isDestroyed()) wc.send('psd:import-progress', { index, total, name, state })
+  }
+  for (const [index, filePath] of paths.entries()) {
+    const name = basename(filePath).replace(/\.psd$/i, '')
+    emit(index, name, 'working')
     try {
       const st = await stat(filePath)
       const key = createHash('md5').update(`${filePath}|${st.size}|${st.mtimeMs}`).digest('hex')
@@ -623,22 +631,24 @@ ipcMain.handle('psd:import', async (_e, paths: string[], maxThumbBytes?: number)
       }
       results.push({
         path: filePath,
-        name: basename(filePath).replace(/\.psd$/i, ''),
+        name,
         w,
         h,
         dataUrl,
         thumbPath: cachePath
       })
+      emit(index, name, 'ok')
     } catch (err) {
       results.push({
         path: filePath,
-        name: basename(filePath),
+        name,
         w: 0,
         h: 0,
         dataUrl: null,
         thumbPath: '',
         error: String(err)
       })
+      emit(index, name, 'fail')
     }
   }
   // 新生成的缩略图已写入，此时封顶删掉的是更久没用的旧缓存

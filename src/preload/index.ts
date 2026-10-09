@@ -26,6 +26,15 @@ const api = {
   readDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke('file:read-dataurl', p),
   pathsForFiles: (files: File[]): string[] =>
     files.map((f) => webUtils.getPathForFile(f)).filter((p): p is string => !!p),
+  // 导入 PSD 的逐文件进度（渲染层弹窗用；返回取消订阅）
+  onPsdImportProgress: (
+    cb: (p: { index: number; total: number; name: string; state: 'working' | 'ok' | 'fail' }) => void
+  ): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: unknown): void =>
+      cb(p as { index: number; total: number; name: string; state: 'working' | 'ok' | 'fail' })
+    ipcRenderer.on('psd:import-progress', listener)
+    return () => ipcRenderer.removeListener('psd:import-progress', listener)
+  },
   // 导出（bytes 为渲染层编码好的图片字节，结构化克隆直传）
   saveImage: (defaultName: string, format: string, bytes: Uint8Array): Promise<boolean> =>
     ipcRenderer.invoke('image:save', defaultName, format, bytes),

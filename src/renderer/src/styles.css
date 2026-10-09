@@ -1080,6 +1080,35 @@ body.dark .css-hl .ts { color: #82aaff; }
 .modal input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 .modal .row2 { display: flex; gap: 10px; justify-content: flex-end; }
 
+/* ========== 上传 PSD 进度弹窗 ========== */
+.up-bar {
+  height: 4px; margin: 14px 0 10px; border-radius: 999px;
+  background: var(--panel-3); overflow: hidden;
+}
+.up-bar i {
+  display: block; height: 100%; border-radius: 999px;
+  background: var(--accent-grad); transition: width 0.22s var(--ease);
+}
+.up-list {
+  max-height: 216px; overflow-y: auto; margin: 10px 0 6px;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.up-item { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 12px; color: var(--txt-2); }
+.up-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-item .st { flex-shrink: 0; font-size: 11px; color: var(--txt-3); }
+.up-item.pending { color: var(--txt-3); }
+.up-item.working .st { color: var(--accent-2); }
+.up-item.ok .st { color: #16a34a; }
+.up-item.fail .nm { color: var(--txt-3); }
+.up-item.fail .st { color: #ef4444; }
+.up-spin {
+  flex-shrink: 0; width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid var(--line-2); border-top-color: var(--accent);
+  animation: up-spin-kf 0.7s linear infinite;
+}
+@keyframes up-spin-kf { to { transform: rotate(360deg); } }
+.up-modal .btn:disabled { opacity: 0.45; cursor: default; }
+
 /* ========== Toast ========== */
 #toast-wrap {
   position: fixed; top: 64px; left: 50%; transform: translateX(-50%);

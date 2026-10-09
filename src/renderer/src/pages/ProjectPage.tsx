@@ -71,6 +71,72 @@ async function importPaths(paths: string[]): Promise<{ ok: ProjectPsd[]; failed:
   return { ok, failed }
 }
 
+type UploadState = 'pending' | 'working' | 'ok' | 'fail'
+interface UploadItem {
+  name: string
+  state: UploadState
+}
+
+function psdName(p: string): string {
+  const base = p.split(/[\\/]/).pop() ?? p
+  return base.replace(/\.psd$/i, '')
+}
+
+function UploadModal({
+  items,
+  done,
+  onClose
+}: {
+  items: UploadItem[]
+  done: boolean
+  onClose: () => void
+}) {
+  const t = useT()
+  const total = items.length
+  const finished = items.filter((i) => i.state === 'ok' || i.state === 'fail').length
+  const failedCount = items.filter((i) => i.state === 'fail').length
+  const LABEL: Record<UploadState, string> = {
+    pending: t('排队中'),
+    working: t('读取中…'),
+    ok: t('已添加'),
+    fail: t('失败')
+  }
+  return (
+    <div className="modal-mask">
+      <div className="modal up-modal">
+        <h3>{done ? t('导入完成') : t('正在导入 PSD')}</h3>
+        <div className="up-bar">
+          <i style={{ width: `${Math.round((finished / Math.max(total, 1)) * 100)}%` }} />
+        </div>
+        <p className="up-summary">
+          {total === 1 ? items[0].name : t('共 {n} 个 · 已完成 {d}', { n: total, d: finished })}
+        </p>
+        {total > 1 && (
+          <div className="up-list">
+            {items.map((it, i) => (
+              <div key={i} className={`up-item ${it.state}`}>
+                {it.state === 'working' && <span className="up-spin" />}
+                <span className="nm">{it.name}</span>
+                <span className="st">{LABEL[it.state]}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="row2">
+          <button
+            className="btn btn-primary"
+            disabled={!done}
+            onClick={onClose}
+            autoFocus
+          >
+            {done && failedCount ? t('知道了') : t('完成')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUpload }: Props) {
   const t = useT()
   const [selectedGroup, setSelectedGroup] = useState<string>('all')
@@ -84,10 +150,20 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
       return !v
     })
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set())
+  const [progress, setProgress] = useState<{ items: UploadItem[]; done: boolean } | null>(null)
   const dialog = useDialog()
   const toast = useToast()
   const selectedGroupRef = useRef(selectedGroup)
   selectedGroupRef.current = selectedGroup
+
+  useEffect(() => {
+    if (!progress?.done) return
+    // 全部成功时不用等用户点按钮，稍作停留让结果可见；有失败则留着看是哪个文件
+    if (progress.items.every((i) => i.state === 'ok')) {
+      const timer = setTimeout(() => setProgress(null), 1200)
+      return () => clearTimeout(timer)
+    }
+  }, [progress])
 
   const upload = async (paths?: string[]) => {
     let target = paths
@@ -102,14 +178,40 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
       return
     }
     const groupId = selectedGroup !== 'all' && selectedGroup !== 'ungrouped' ? selectedGroup : null
-    const { ok, failed } = await importPaths(fresh)
+    setProgress({ items: fresh.map((p) => ({ name: psdName(p), state: 'pending' as UploadState })), done: false })
+    const off = window.api.onPsdImportProgress((e) => {
+      setProgress((cur) => {
+        if (!cur || cur.done) return cur
+        const items = cur.items.slice()
+        if (items[e.index]) items[e.index] = { name: e.name || items[e.index].name, state: e.state }
+        else items.push({ name: e.name, state: e.state })
+        return { ...cur, items }
+      })
+    })
+    let ok: ProjectPsd[] = []
+    try {
+      ok = (await importPaths(fresh)).ok
+    } finally {
+      off()
+      // 事件与 invoke 回包不在同一条 IPC 管道上，可能晚于回包到达；
+      // 收尾一律按返回结果对账，弹窗只把事件当过程动画
+      const okPaths = new Set(ok.map((o) => o.path))
+      setProgress({
+        items: fresh.map((p) => ({
+          name: psdName(p),
+          state: (okPaths.has(p) ? 'ok' : 'fail') as UploadState
+        })),
+        done: true
+      })
+    }
+    const failed = fresh.length - ok.length
     onUpdate((p) => {
       for (const item of ok) {
         item.groupId = groupId
         p.psds.push(item)
       }
     })
-    if (failed.length) toast(t('{n} 个文件解析失败', { n: failed.length }), 'error')
+    if (failed) toast(t('{n} 个文件解析失败', { n: failed }), 'error')
     if (ok.length) toast(t('已添加 {n} 个 PSD', { n: ok.length }))
   }
 
@@ -393,6 +495,14 @@ export default function ProjectPage({ project, onUpdate, onOpenPsd, registerUplo
           ))
         )}
       </main>
+
+      {progress && (
+        <UploadModal
+          items={progress.items}
+          done={progress.done}
+          onClose={() => setProgress(null)}
+        />
+      )}
     </div>
   )
 }
