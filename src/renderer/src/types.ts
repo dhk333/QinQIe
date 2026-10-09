@@ -56,6 +56,9 @@ export interface ProjectPsd {
   missing?: boolean
   /** 手工切片，随项目持久化 */
   slices?: DocSlice[]
+  /** 切图基准宽度（px）：画布/切片/CSS/导出的口径，缺省跟随设计稿宽度。
+   *  图层与切片的坐标始终存 PSD 原始像素，改基准只改「读数与出图倍数」，不会动到已切的区域 */
+  basisWidth?: number
   /** 图层编辑量，按 PsdLayer.key 索引；只覆盖渲染输入，不回写 PSD 源文件 */
   layerEdits?: Record<string, LayerEdit>
 }

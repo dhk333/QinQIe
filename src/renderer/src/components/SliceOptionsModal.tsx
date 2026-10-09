@@ -1,24 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DocSlice } from '@/types'
+import { fromBasis, toBasis } from '@/lib/basis'
 import { useT } from '@/i18n/core'
 
 /** 切片选项编辑（PS 切片选项的精简版）：名称 + X/Y/W/H。
- *  确定写回；取消 / Esc / 点击遮罩放弃。数字输入直接回车提交 */
+ *  确定写回；取消 / Esc / 点击遮罩放弃。数字输入直接回车提交。
+ *  basisK 为切图基准倍率：面板按基准口径读写，落回切片仍是 PSD 原始像素 */
 export default function SliceOptionsModal({
   slice,
+  basisK = 1,
   onClose,
   onSubmit
 }: {
   slice: DocSlice
+  basisK?: number
   onClose: () => void
   onSubmit: (patch: { name?: string; x: number; y: number; w: number; h: number }) => void
 }) {
   const t = useT()
   const [name, setName] = useState(slice.name ?? '')
-  const [x, setX] = useState(String(Math.round(slice.x)))
-  const [y, setY] = useState(String(Math.round(slice.y)))
-  const [w, setW] = useState(String(Math.round(slice.w)))
-  const [h, setH] = useState(String(Math.round(slice.h)))
+  const [x, setX] = useState(String(toBasis(slice.x, basisK)))
+  const [y, setY] = useState(String(toBasis(slice.y, basisK)))
+  const [w, setW] = useState(String(toBasis(slice.w, basisK)))
+  const [h, setH] = useState(String(toBasis(slice.h, basisK)))
   const nameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -38,7 +42,7 @@ export default function SliceOptionsModal({
 
   const num = (v: string, min: number): number => {
     const n = Number(v)
-    return Number.isFinite(n) ? Math.max(min, Math.round(n)) : min
+    return Number.isFinite(n) ? Math.max(min, Math.round(fromBasis(n, basisK))) : min
   }
 
   const inputCls =

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'r
 import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
 import { buildCompositeCanvas, flattenLayers, measureContentRect, readLayerPixels, type LayerBitmap } from '@/lib/psd'
+import { toBasis } from '@/lib/basis'
 import { HANDLE_CURSORS, toolCursorCss, useToolCursor } from '@/lib/cursors'
 import { useT } from '@/i18n/core'
 import { useUiPrefs } from '@/lib/uiPrefs'
@@ -18,6 +19,8 @@ export interface CanvasViewApi {
 
 interface Props {
   doc: PsdDoc | null
+  /** 切图基准宽度倍率（基准宽 / 设计稿宽）：画布按它绘制，100% 即基准宽度；坐标换算仍用 PSD 像素 */
+  basisK?: number
   tree: PsdLayer[]
   rnodes: RNode[]
   canvasMap: Map<number, LayerBitmap>
@@ -164,6 +167,7 @@ function nearestTarget(v: number, targets: number[], tol: number): number | null
 
 export default function CanvasView({
   doc,
+  basisK = 1,
   tree,
   rnodes,
   canvasMap,
@@ -193,7 +197,10 @@ export default function CanvasView({
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
-  const [zoom, setZoom] = useState(1)
+  /** zoomState 是「基准口径」的倍率（100% 即画布正好是基准宽）；zoom 才是屏幕像素 / PSD 像素，
+   *  所有 PSD 坐标到屏幕的换算都用 zoom，画布因此随基准宽度整体等比缩放 */
+  const [zoomState, setZoom] = useState(1)
+  const zoom = zoomState * basisK
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [drawingRect, setDrawingRect] = useState<DrawRect | null>(null)
   /** 贴边参考线（文档坐标）：切片拖拽/缩放/移动中吸附生效的边 */
@@ -227,11 +234,10 @@ export default function CanvasView({
 
   const fit = useCallback(() => {
     if (!doc || size.w === 0 || size.h === 0) return
-    const scale = Math.min((size.w - 80) / doc.width, (size.h - 80) / doc.height)
-    const z = Math.max(0.02, Math.min(8, scale))
-    setZoom(z)
+    const z = Math.max(0.02, Math.min(8, Math.min((size.w - 80) / doc.width, (size.h - 80) / doc.height)))
+    setZoom(z / basisK)
     setOffset({ x: (size.w - doc.width * z) / 2, y: (size.h - doc.height * z) / 2 })
-  }, [doc, size.w, size.h])
+  }, [doc, size.w, size.h, basisK])
 
   useEffect(() => {
     if (doc && doc.fileName !== lastFitDoc.current && size.w > 0) {
@@ -262,10 +268,10 @@ export default function CanvasView({
     (rect: { x: number; y: number; w: number; h: number }) => {
       if (size.w === 0 || size.h === 0 || rect.w <= 0 || rect.h <= 0) return
       const z = Math.max(0.02, Math.min(8, Math.min((size.w - 120) / rect.w, (size.h - 120) / rect.h)))
-      setZoom(z)
+      setZoom(z / basisK)
       setOffset({ x: (size.w - rect.w * z) / 2 - rect.x * z, y: (size.h - rect.h * z) / 2 - rect.y * z })
     },
-    [size.w, size.h]
+    [size.w, size.h, basisK]
   )
 
   // Space 按住 = 临时抓手（MasterGo/Figma 范式），松开恢复原工具
@@ -295,15 +301,19 @@ export default function CanvasView({
   }, [])
 
   useEffect(() => {
-    onZoomChange?.(Math.round(zoom * 100))
-  }, [zoom, onZoomChange])
+    onZoomChange?.(Math.round(zoomState * 100))
+  }, [zoomState, onZoomChange])
 
   // 首次带 doc 的通知仍是适配前的默认视口，由调用方丢弃后再记录真实视口
   useEffect(() => {
-    if (doc) onViewChange?.({ zoom, x: offset.x, y: offset.y })
-  }, [doc, zoom, offset, onViewChange])
+    if (doc) onViewChange?.({ zoom: zoomState, x: offset.x, y: offset.y })
+  }, [doc, zoomState, offset, onViewChange])
 
-  useImperativeHandle(apiRef, () => ({ fit, applyZoom, zoomTo, getZoom: () => zoom }), [fit, applyZoom, zoomTo, zoom])
+  useImperativeHandle(
+    apiRef,
+    () => ({ fit, applyZoom, zoomTo, getZoom: () => zoomState }),
+    [fit, applyZoom, zoomTo, zoomState]
+  )
 
   // 选框/标注以「可见内容」为准：位图边界常含透明留白，直接画会比图形大一圈。
   // 编辑过的图层同样要量——投影后的 width 仍是位图边界，只有 alpha 才对应眼中的图形；
@@ -411,7 +421,7 @@ export default function CanvasView({
         }
         ctx.fillStyle = accent
         ctx.font = '11px sans-serif'
-        ctx.fillText(`${box.width} × ${box.height}`, x, y - 6)
+        ctx.fillText(`${toBasis(box.width, basisK)} × ${toBasis(box.height, basisK)}`, x, y - 6)
       }
     }
 
@@ -476,7 +486,7 @@ export default function CanvasView({
             }
           }
           ctx.stroke()
-          const label = String(Math.round(val))
+          const label = String(toBasis(val, basisK))
           ctx.font = '11px Consolas, monospace'
           const tw = ctx.measureText(label).width + 10
           const cx = (sx + ex) / 2
@@ -583,7 +593,7 @@ export default function CanvasView({
         ctx.lineWidth = 1
       }
     }
-  }, [doc, tree, rnodes, canvasMap, hiddenIds, preview, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId, uiPrefs, snapGuides])
+  }, [doc, basisK, tree, rnodes, canvasMap, hiddenIds, preview, selectedIds, zoom, offset, size, slices, selectedSliceIds, showSlices, drawingRect, tool, hoverId, uiPrefs, snapGuides])
 
   // 滚轮缩放
   useEffect(() => {

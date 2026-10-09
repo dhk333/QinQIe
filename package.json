@@ -1,6 +1,6 @@
 {
   "name": "qingqie",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "轻切 - 前端切图工具",
   "main": "./out/main/index.js",
   "author": "daihongkun",

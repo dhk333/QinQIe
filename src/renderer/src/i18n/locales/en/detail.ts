@@ -62,6 +62,18 @@ export default {
   '适应画布 (Shift+1)': 'Zoom to fit (Shift+1)',
   '缩放至 100% (Ctrl+0)': 'Zoom to 100% (Ctrl+0)',
   '快捷键一览 (?)': 'Keyboard shortcuts (?)',
+  // 切图基准宽度（缩放条弹层）
+  '切图基准宽度 — 画布、切片与 CSS 都按这个宽度出图，高度按设计稿等比自动':
+    'Slice basis width — canvas, slices and CSS all output at this width; the height follows the artboard ratio',
+  '切图基准宽度': 'Slice Basis Width',
+  '原稿': 'Original',
+  '跟随原稿': 'Follow original',
+  '设计稿': 'Artboard',
+  '出图口径': 'Output',
+  '切片与图层的 X/Y/W/H、导出像素、复制的 CSS 全部换算到这个宽度；内部仍存 PSD 原始像素，改回原稿不丢切片':
+    'Slice / layer X/Y/W/H, exported pixels and copied CSS are converted to this width. Coordinates stay in original PSD pixels, so switching back never loses slices',
+  '按基准宽度 {w}px 计': 'Measured at the {w}px basis width',
+  '基准 {w}px': 'Basis {w}px',
   // 切片导出空状态 toast
   '还没有切片，用切片工具在画布上拖拽创建': 'No slices yet — drag on the canvas with the Slice tool to create one',
   // 导出进度浮层

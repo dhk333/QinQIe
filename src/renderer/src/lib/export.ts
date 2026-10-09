@@ -144,9 +144,11 @@ export function layerCssSnippet(
   rnode?: RNode,
   units: CssUnitsPrefs = getUiPrefs().cssUnits,
   docWidth?: number | null,
-  content?: LayerContent | null
+  content?: LayerContent | null,
+  /** 切图基准宽度倍率（见 lib/basis.ts）：CSS 要落在页面上，所以全部长度按基准口径给 */
+  basisK = 1
 ): string {
-  const len = (px: number) => fmtLen(px, units, docWidth)
+  const len = (px: number) => fmtLen(px * basisK, units, docWidth)
   const lines: string[] = []
   const kind = layer.type === 'group' ? '图层组' : layer.isText ? '文本图层' : '像素图层'
   const tags = [kind, layer.hidden ? '已隐藏' : null, layer.clipping ? '剪贴蒙版' : null].filter(Boolean)
@@ -159,11 +161,14 @@ export function layerCssSnippet(
   const boxTop = Math.round(layer.top + (content ? content.padT * sy : 0))
   const boxW = Math.max(1, Math.round(content ? content.cw * sx : layer.width))
   const boxH = Math.max(1, Math.round(content ? content.ch * sy : layer.height))
-  // 非 px 单位时留一行 PSD 原始像素值，方便回查与换算核对
-  if (units.unit !== 'px') {
-    const base = cssUnitBase(units, docWidth)
+  // 换算过口径（非 px 单位、或走了切图基准宽度）就留一行 PSD 原始像素值，方便回查核对
+  if (units.unit !== 'px' || basisK !== 1) {
+    const note: string[] = []
+    if (basisK !== 1)
+      note.push(`基准 ${Math.round(docWidth ?? 0)}px（设计稿 ×${Math.round(basisK * 1000) / 1000}）`)
+    if (units.unit !== 'px') note.push(`单位 ${units.unit} · 基准 ${cssUnitBase(units, docWidth)}px`)
     lines.push(
-      `/* 单位 ${units.unit} · 基准 ${base}px · PSD 图层边界 X ${layer.left} Y ${layer.top} ${layer.width}×${layer.height} */`
+      `/* ${note.join(' · ')} · PSD 图层边界 X ${layer.left} Y ${layer.top} ${layer.width}×${layer.height} */`
     )
   }
   lines.push('position: absolute;')

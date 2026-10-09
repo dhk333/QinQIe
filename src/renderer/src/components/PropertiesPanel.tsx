@@ -5,6 +5,7 @@ import { loadExportPrefs } from '@/lib/exportPrefs'
 import type { CssUnit } from '@/lib/cssUnits'
 import { setUiPrefs, useUiPrefs } from '@/lib/uiPrefs'
 import { indexRNodes, measureLayerContent, renderLayerCanvas, type LayerBitmap } from '@/lib/psd'
+import { fromBasis, toBasis } from '@/lib/basis'
 import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
 import { CaretDownIcon, CheckIcon, ChevronRightIcon, CopyIcon, LinkIcon, UndoIcon } from './icons'
@@ -13,6 +14,10 @@ import Slider from './Slider'
 interface Props {
   layer: PsdLayer | null
   doc: PsdDoc | null
+  /** 切图基准宽度倍率：X/Y/W/H 按基准口径读写，落回图层仍是 PSD 原始像素 */
+  basisK?: number
+  /** 基准口径下的画布宽度，vw 单位与提示文案用它 */
+  canvasW?: number
   rnodes: RNode[]
   canvasMap: Map<number, LayerBitmap>
   hiddenIds: Set<number>
@@ -425,6 +430,8 @@ function CssCode({ css }: { css: string }) {
 export default function PropertiesPanel({
   layer,
   doc,
+  basisK = 1,
+  canvasW,
   rnodes,
   canvasMap,
   hiddenIds,
@@ -467,9 +474,9 @@ export default function PropertiesPanel({
     [layer, canvasMap]
   )
   const css = useMemo(
-    () => (layer ? layerCssSnippet(layer, color, rnode, cssUnits, doc?.width, content) : ''),
+    () => (layer ? layerCssSnippet(layer, color, rnode, cssUnits, canvasW || doc?.width, content, basisK) : ''),
     // getLang(): CSS 注释内嵌展示标签，语言切换后需重新生成
-    [layer, color, rnode, cssUnits, doc?.width, content, getLang()]
+    [layer, color, rnode, cssUnits, doc?.width, canvasW, basisK, content, getLang()]
   )
   const setCssUnit = (unit: CssUnit) => setUiPrefs({ cssUnits: { ...cssUnits, unit } })
   const previewUrl = useMemo(() => {
@@ -536,27 +543,37 @@ export default function PropertiesPanel({
   // 编辑宽度 = 位图边界重采样，所以输入的内容目标值要按 内容/位图 比例换算回边界尺寸；平移不改变留白，X/Y 换算精确。
   const sx = content && content.bw > 0 ? layer.width / content.bw : 1
   const sy = content && content.bh > 0 ? layer.height / content.bh : 1
-  const shownLeft = Math.round(layer.left + (content ? content.padL * sx : 0))
-  const shownTop = Math.round(layer.top + (content ? content.padT * sy : 0))
-  const shownW = Math.max(1, Math.round(content ? content.cw * sx : layer.width))
-  const shownH = Math.max(1, Math.round(content ? content.ch * sy : layer.height))
-  const toBitmapW = (v: number) =>
-    Math.max(1, content && content.cw > 0 ? Math.round((v * content.bw) / content.cw) : v)
-  const toBitmapH = (v: number) =>
-    Math.max(1, content && content.ch > 0 ? Math.round((v * content.bh) / content.ch) : v)
+  // 几何四项（X/Y/W/H）按切图基准口径读写：2560 的稿设 1920 时面板直接给页面上的值。
+  // raw* 是 PSD 原始像素，写回图层编辑量时仍用它，所以改基准不会污染已存的编辑。
+  const rawLeft = layer.left + (content ? content.padL * sx : 0)
+  const rawTop = layer.top + (content ? content.padT * sy : 0)
+  const rawW = Math.max(1, content ? content.cw * sx : layer.width)
+  const rawH = Math.max(1, content ? content.ch * sy : layer.height)
+  const shownLeft = toBasis(rawLeft, basisK)
+  const shownTop = toBasis(rawTop, basisK)
+  const shownW = toBasis(rawW, basisK)
+  const shownH = toBasis(rawH, basisK)
+  const toBitmapW = (v: number) => {
+    const doc = fromBasis(v, basisK)
+    return Math.max(1, content && content.cw > 0 ? Math.round((doc * content.bw) / content.cw) : doc)
+  }
+  const toBitmapH = (v: number) => {
+    const doc = fromBasis(v, basisK)
+    return Math.max(1, content && content.ch > 0 ? Math.round((doc * content.bh) / content.ch) : doc)
+  }
   const setPos = (axis: 'dx' | 'dy', v: number) => {
-    const shown = axis === 'dx' ? shownLeft : shownTop
+    const raw = axis === 'dx' ? rawLeft : rawTop
     const base = (axis === 'dx' ? edit?.dx : edit?.dy) ?? 0
-    patch({ [axis]: base + (v - shown) } as Partial<LayerEdit>)
+    patch({ [axis]: base + (fromBasis(v, basisK) - raw) } as Partial<LayerEdit>)
   }
   const setW = (v: number) => {
     const width = toBitmapW(v)
-    if (!lockRatio || shownW <= 0) return patch({ width })
+    if (!lockRatio || rawW <= 0) return patch({ width })
     patch({ width, height: toBitmapH(Math.max(1, Math.round((v * shownH) / shownW))) })
   }
   const setH = (v: number) => {
     const height = toBitmapH(v)
-    if (!lockRatio || shownH <= 0) return patch({ height })
+    if (!lockRatio || rawH <= 0) return patch({ height })
     patch({ height, width: toBitmapW(Math.max(1, Math.round((v * shownW) / shownH))) })
   }
 
@@ -858,7 +875,7 @@ export default function PropertiesPanel({
           </div>
           <div style={{ marginTop: 8 }}>
             {layer.textInfo.fontSize != null && (
-              <InfoRow label={t('字体大小')} value={`${layer.textInfo.fontSize} px`} />
+              <InfoRow label={t('字体大小')} value={`${toBasis(layer.textInfo.fontSize, basisK)} px`} />
             )}
             {layer.textInfo.color && (
               <div className="flex items-center justify-between py-1">
@@ -879,7 +896,7 @@ export default function PropertiesPanel({
             {layer.textInfo.fontWeight && <InfoRow label={t('字重')} value={layer.textInfo.fontWeight} />}
             {layer.textInfo.fontFamily && <InfoRow label={t('字体')} value={layer.textInfo.fontFamily} />}
             {layer.textInfo.leading != null && (
-              <InfoRow label={t('行距')} value={`${Math.round(layer.textInfo.leading * 10) / 10} px`} />
+              <InfoRow label={t('行距')} value={`${toBasis(layer.textInfo.leading, basisK)} px`} />
             )}
             {layer.textInfo.tracking != null && layer.textInfo.tracking !== 0 && (
               <InfoRow
@@ -911,11 +928,13 @@ export default function PropertiesPanel({
               </div>
             )}
           </Dropdown>
-          {cssUnits.unit !== 'px' && (
+          {(cssUnits.unit !== 'px' || basisK !== 1) && (
             <span className="font-mono text-[10.5px] text-txt-3">
               {cssUnits.unit === 'rem'
                 ? `1rem = ${cssUnits.remBase}px`
-                : `100vw = ${doc?.width ?? cssUnits.vwBase}px`}
+                : cssUnits.unit === 'vw'
+                  ? `100vw = ${canvasW || (doc?.width ?? cssUnits.vwBase)}px`
+                  : t('基准 {w}px', { w: canvasW || doc?.width || 0 })}
             </span>
           )}
         </div>

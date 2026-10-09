@@ -610,6 +610,38 @@ body {
 .pct-menu span:hover { background: var(--panel-3); color: var(--txt); }
 .pct-menu span.on { color: var(--accent-2); background: var(--accent-dim); }
 
+/* ========== 切图基准宽度弹层（挂在缩放条 .pct-menu 上） ========== */
+.zoombar .pct.basis-trigger { min-width: 40px; }
+.basis-menu { width: 252px; padding: 11px; gap: 9px; align-items: stretch; }
+/* .pct-menu span 是给倍数档位用的按钮样式，这里的 span 都是排版容器，逐条还原 */
+.basis-menu > span,
+.basis-menu > span:hover {
+  padding: 0; border-radius: 0; background: none; text-align: left; cursor: default;
+  font-family: inherit; font-size: 11.5px; color: var(--txt-2);
+}
+.bm-title { font-size: 12px; font-weight: 600; color: var(--txt); }
+.bm-row { display: flex; align-items: center; gap: 6px; }
+.bm-input {
+  min-width: 0; flex: 1; padding: 5px 8px; border: 1px solid var(--line-2); border-radius: 6px;
+  background: var(--panel-2); color: var(--txt); outline: none;
+  font-family: Consolas, monospace; font-size: 12px; transition: border-color 0.15s;
+}
+.bm-input:focus { border-color: var(--accent); }
+.bm-unit { font-size: 11px; color: var(--txt-3); }
+.bm-calc { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 11px; color: var(--txt-3); }
+.bm-calc b { font-weight: 500; color: var(--txt-2); font-family: Consolas, monospace; }
+.bm-calc i { font-style: normal; }
+.bm-calc em { font-style: normal; margin-left: auto; color: var(--accent-2); font-family: Consolas, monospace; }
+.bm-opts { display: flex; flex-wrap: wrap; gap: 5px; }
+.bm-chip {
+  padding: 3px 8px; border: 1px solid var(--line-2); border-radius: 6px;
+  background: var(--panel-2); color: var(--txt-2); cursor: pointer;
+  font-family: Consolas, monospace; font-size: 11px; transition: all 0.15s;
+}
+.bm-chip:hover { border-color: var(--accent); color: var(--txt); }
+.bm-chip.on { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-2); }
+.bm-hint { font-size: 10.5px; line-height: 1.55; color: var(--txt-3); }
+
 /* ========== 批量导出条 ========== */
 .batch-bar {
   position: absolute; top: 24px; left: 50%; transform: translateX(-50%);

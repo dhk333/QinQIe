@@ -15,6 +15,7 @@ import { decodeLayersInWorker, WorkerDecodeError, WorkerCancelledError } from '@
 import { readPsdCache, writePsdCache } from '@/lib/psdCache'
 import { applyLayerEdits, editBaseName, patchEdit, type LayerEdits } from '@/lib/layerEdits'
 import { exportCanvasBytes } from '@/lib/export'
+import { basisScale, fromBasis, toBasis } from '@/lib/basis'
 import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
 import { getUiPrefs } from '@/lib/uiPrefs'
 import { loadView, saveLastRoute, saveView } from '@/lib/session'
@@ -44,6 +45,9 @@ import {
 } from '@/components/icons'
 import type { PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
+
+/** 详情页常见出图宽度预设（电商详情页/移动端详情常用档），点击即应用 */
+const BASIS_PRESETS = [1920, 1500, 1200, 790, 750]
 
 interface Props {
   project: Project
@@ -210,6 +214,23 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
   const [sliceMenu, setSliceMenu] = useState<{ x: number; y: number; sliceId: string } | null>(null)
   const [sliceEditId, setSliceEditId] = useState<string | null>(null)
   const [showSlices, setShowSlices] = useState(true)
+  /** 切图基准宽度（px）：0 表示跟随设计稿。画布显示、切片读数、导出像素与 CSS 都换成这个口径，
+   *  高度按设计稿等比自动得出；内部坐标仍存 PSD 原始像素 */
+  const [basisWidth, setBasisWidth] = useState(() => psd.basisWidth ?? 0)
+  const [basisOpen, setBasisOpen] = useState(false)
+  /** 基准宽度输入框的草稿：逐键不生效，回车 / 失焦或点预设才应用，避免输到一半画布乱缩 */
+  const [basisDraft, setBasisDraft] = useState('')
+  const basisSavedRef = useRef(basisWidth)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (basisSavedRef.current === basisWidth) return
+      basisSavedRef.current = basisWidth
+      onUpdatePsd((p) => {
+        p.basisWidth = basisWidth > 0 ? basisWidth : undefined
+      })
+    }, 400)
+    return () => clearTimeout(t)
+  }, [basisWidth, onUpdatePsd])
   const sliceSeq = useRef(1)
   // 统一撤销栈：切片与图层编辑按改动时间线共用一组 past/future，直接存改动前后快照
   const histRef = useRef<{
@@ -336,6 +357,16 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     () => applyLayerEdits(rawTree, rawRnodes, layerEdits),
     [rawTree, rawRnodes, layerEdits]
   )
+  /** 切图基准倍率，以及基准口径下的画布尺寸（高度按设计稿等比自动得出） */
+  const basisK = useMemo(() => basisScale(basisWidth || undefined, doc?.width ?? 0), [basisWidth, doc?.width])
+  const canvasW = doc ? Math.round(doc.width * basisK) : 0
+  const canvasH = doc ? Math.round(doc.height * basisK) : 0
+  /** 落地一个基准宽度；与设计稿等宽时视作「跟随原稿」，不占持久化字段 */
+  const applyBasis = (v: number) => {
+    const w = Number.isFinite(v) && v > 0 ? Math.round(v) : 0
+    setBasisDraft(String(w > 0 ? w : doc?.width ?? 0))
+    setBasisWidth(doc && w === doc.width ? 0 : w)
+  }
 
   // 面板拖拽
   const leftRef = useRef<HTMLElement>(null)
@@ -388,6 +419,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     const close = () => {
       setPctMenuOpen(false)
       setBatchOpen(false)
+      setBasisOpen(false)
     }
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
@@ -479,6 +511,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       const restoredEdits = psd.layerEdits ?? {}
       editSavedRef.current = restoredEdits
       setLayerEditsRaw(restoredEdits)
+      basisSavedRef.current = psd.basisWidth ?? 0
+      setBasisWidth(psd.basisWidth ?? 0)
     }
     ;(async () => {
       try {
@@ -663,7 +697,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         return
       }
       const safeName = selectedLayer.name.replace(/[\\/:*?"<>|]/g, '_')
-      const bytes = await exportCanvasBytes(canvas, { scale, format, quality })
+      // 出图口径：@1x 就是基准宽度下的 1px，所以倍率再乘基准系数
+      const bytes = await exportCanvasBytes(canvas, { scale: scale * basisK, format, quality })
       if (!bytes) {
         toast(t('该图层导出失败'), 'error')
         return
@@ -671,7 +706,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       const saved = await window.api.saveImage(`${safeName}@${scale}x.${extOf(format)}`, format, bytes)
       if (saved) toast(t('已导出 {file}', { file: `${safeName}@${scale}x.${extOf(format)}` }))
     },
-    [selectedLayer, doc, rnodes, hiddenIds, decoding, toast, t]
+    [selectedLayer, doc, rnodes, hiddenIds, decoding, basisK, toast, t]
   )
 
   const toggleHidden = useCallback(
@@ -733,14 +768,14 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
               // 走合成器出图：含蒙版、图层样式与剪贴，与画布所见一致；组节点合成整棵子树
               const canvas = renderLayerCanvas(captured, rnodes, hiddenIds)
               if (!canvas) return null
-              return exportCanvasBytes(canvas, { scale, format, quality })
+              return exportCanvasBytes(canvas, { scale: scale * basisK, format, quality })
             }
           })
         }
       }
       return writeAll(items)
     },
-    [rnodes, hiddenIds, template, writeAll, decoding, toast, t]
+    [rnodes, hiddenIds, template, writeAll, decoding, basisK, toast, t]
   )
 
   const exportAll = useCallback(
@@ -938,7 +973,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             name: applyTemplate(template, base, scale, fmt, ++seq),
             run: () =>
               exportCanvasBytes(composite, {
-                scale,
+                scale: scale * basisK,
                 format: fmt,
                 quality,
                 srcRect: { x: s.x, y: s.y, w: s.w, h: s.h }
@@ -948,7 +983,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       }
       return writeAll(items)
     },
-    [doc, slices, selectedSliceIds, rnodes, hiddenIds, template, writeAll, decoding, toast, t]
+    [doc, slices, selectedSliceIds, rnodes, hiddenIds, template, writeAll, decoding, basisK, toast, t]
   )
 
   const handlePickColor = useCallback(
@@ -1180,6 +1215,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       <div className="canvas-mid" style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex' }}>
         <CanvasView
           doc={doc}
+          basisK={basisK}
           tree={tree}
           rnodes={rnodes}
           canvasMap={canvasMapRef.current}
@@ -1236,12 +1272,16 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
                     onChange={(e) => updateSelectedSlice({ name: e.target.value })}
                   />
                   {([['X', 'x'], ['Y', 'y'], ['W', 'w'], ['H', 'h']] as const).map(([label, key]) => (
-                    <label key={key}>
+                    <label key={key} title={basisK === 1 ? undefined : t('按基准宽度 {w}px 计', { w: canvasW })}>
                       {label}
                       <input
                         type="number"
-                        value={Math.round(selectedSlice[key])}
-                        onChange={(e) => updateSelectedSlice({ [key]: Number(e.target.value) || 0 })}
+                        value={toBasis(selectedSlice[key], basisK)}
+                        onChange={(e) =>
+                          updateSelectedSlice({
+                            [key]: Math.round(fromBasis(Number(e.target.value) || 0, basisK))
+                          })
+                        }
                       />
                     </label>
                   ))}
@@ -1401,6 +1441,70 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             <EyeIcon />
           </span>
           <span className="sep" />
+          <span className="pct-wrap">
+            <span
+              className={`pct basis-trigger${basisOpen ? ' on' : ''}`}
+              title={t('切图基准宽度 — 画布、切片与 CSS 都按这个宽度出图，高度按设计稿等比自动')}
+              onClick={(e) => {
+                e.stopPropagation()
+                setBasisDraft('')
+                setBasisOpen((v) => !v)
+              }}
+            >
+              {basisK === 1 ? t('原稿') : canvasW}
+            </span>
+            <span
+              className={`pct-menu basis-menu${basisOpen ? ' open' : ''}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="bm-title">{t('切图基准宽度')}</span>
+              <span className="bm-row">
+                <input
+                  className="bm-input"
+                  type="number"
+                  min={1}
+                  value={basisDraft === '' ? String(canvasW) : basisDraft}
+                  onChange={(e) => setBasisDraft(e.target.value)}
+                  onBlur={() => applyBasis(Number(basisDraft))}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return
+                    applyBasis(Number(basisDraft))
+                    setBasisOpen(false)
+                  }}
+                />
+                <span className="bm-unit">px</span>
+                <button
+                  type="button"
+                  className={`bm-chip${basisK === 1 ? ' on' : ''}`}
+                  onClick={() => applyBasis(doc?.width ?? 0)}
+                >
+                  {t('跟随原稿')}
+                </button>
+              </span>
+              <span className="bm-calc">
+                {t('设计稿')} <b>{doc?.width} × {doc?.height}</b>
+                <i className="bm-arrow">→</i>
+                {t('出图口径')} <b>{canvasW} × {canvasH}</b>
+                <em>×{Math.round(basisK * 1000) / 1000}</em>
+              </span>
+              <span className="bm-opts">
+                {BASIS_PRESETS.map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    className={`bm-chip${basisK !== 1 && canvasW === w ? ' on' : ''}`}
+                    onClick={() => applyBasis(w)}
+                  >
+                    {w}
+                  </button>
+                ))}
+              </span>
+              <span className="bm-hint">
+                {t('切片与图层的 X/Y/W/H、导出像素、复制的 CSS 全部换算到这个宽度；内部仍存 PSD 原始像素，改回原稿不丢切片')}
+              </span>
+            </span>
+          </span>
+          <span className="sep" />
           <span
             className="zb"
             title={t('缩小')}
@@ -1489,6 +1593,8 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         <PropertiesPanel
           layer={selectedLayer}
           doc={doc}
+          basisK={basisK}
+          canvasW={canvasW}
           rnodes={rnodes}
           canvasMap={canvasMapRef.current}
           hiddenIds={hiddenIds}
@@ -1513,6 +1619,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
           return s ? (
             <SliceOptionsModal
               slice={s}
+              basisK={basisK}
               onClose={() => setSliceEditId(null)}
               onSubmit={(patch) => {
                 setSlices((prev) => prev.map((x) => (x.id === sliceEditId ? { ...x, ...patch } : x)))
