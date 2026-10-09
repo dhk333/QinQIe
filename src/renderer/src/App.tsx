@@ -7,7 +7,6 @@ import { applyTheme, loadTheme } from '@/lib/themes'
 import { applyFontSize, loadFontSize, type FontSizeId } from '@/lib/uiFont'
 import { getUiPrefs } from '@/lib/uiPrefs'
 import { loadLastRoute } from '@/lib/session'
-import { onboardingSeen, startOnboarding } from '@/lib/onboarding'
 import HomePage from '@/pages/HomePage'
 import ProjectPage from '@/pages/ProjectPage'
 import DetailPage from '@/pages/DetailPage'
@@ -75,18 +74,13 @@ export default function App() {
     startupDone.current = true
     const prefs = getUiPrefs()
     if (prefs.thumbCapMB) void window.api.trimThumbCache(prefs.thumbCapMB * 1024 * 1024)
-    // 首次启动要先看新手引导，恢复顺延到下次
-    if (!prefs.lastPsdOnStartup || !onboardingSeen()) return
+    if (!prefs.lastPsdOnStartup) return
     if (location.hash && location.hash !== '#/home') return
     const last = loadLastRoute()
     if (!last) return
     const project = projects.find((p) => p.id === last.projectId)
     if (!project?.psds.some((s) => s.id === last.psdId)) return
     navigate(`#/detail/${project.id}/${last.psdId}`)
-  }, [projects])
-
-  useEffect(() => {
-    if (projects && !onboardingSeen()) startOnboarding()
   }, [projects])
 
   const persist = useCallback((mutate: (list: Project[]) => void) => {

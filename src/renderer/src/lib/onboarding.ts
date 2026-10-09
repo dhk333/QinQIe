@@ -65,24 +65,6 @@ export const TOUR_STEPS: TourStep[] = [
   }
 ]
 
-const SEEN_KEY = 'qingqie.onboarding-seen'
-
-export function onboardingSeen(): boolean {
-  try {
-    return localStorage.getItem(SEEN_KEY) === '1'
-  } catch {
-    return true
-  }
-}
-
-export function markOnboardingSeen(): void {
-  try {
-    localStorage.setItem(SEEN_KEY, '1')
-  } catch {
-    // 存储不可用时下次启动会再引导一遍
-  }
-}
-
 let running = false
 const subs = new Set<() => void>()
 

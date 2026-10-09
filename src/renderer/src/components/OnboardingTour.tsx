@@ -5,7 +5,6 @@ import { navigate, useHashRoute } from '@/lib/router'
 import { useT } from '@/i18n/core'
 import {
   TOUR_STEPS,
-  markOnboardingSeen,
   stopOnboarding,
   useOnboardingRunning,
   type TourPage
@@ -124,7 +123,6 @@ export default function OnboardingTour({ projects }: { projects: Project[] }) {
   }, [applyBox])
 
   const finish = useCallback(() => {
-    markOnboardingSeen()
     stopOnboarding()
   }, [])
 
