@@ -16,6 +16,7 @@ import { readPsdCache, writePsdCache } from '@/lib/psdCache'
 import { applyLayerEdits, editBaseName, patchEdit, type LayerEdits } from '@/lib/layerEdits'
 import { exportCanvasBytes } from '@/lib/export'
 import { basisScale, fromBasis, toBasis } from '@/lib/basis'
+import { clipInfoOf } from '@/lib/clipping'
 import { loadExportPrefs, saveExportPrefs } from '@/lib/exportPrefs'
 import { getUiPrefs } from '@/lib/uiPrefs'
 import { loadView, saveLastRoute, saveView } from '@/lib/session'
@@ -684,6 +685,18 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
     [toast]
   )
 
+  /** 单图层出图：被剪贴的图层按基底 alpha 裁切，并收进可见框——
+   *  出图尺寸与画布选框、面板读数、CSS 完全同一口径 */
+  const renderForExport = useCallback(
+    (layer: PsdLayer) => {
+      const info = clipInfoOf(rnodes)
+      const base = info.bases.get(layer.id)
+      const box = info.boxes.get(layer.id)
+      return renderLayerCanvas(layer, rnodes, hiddenIds, base && box ? { base, box } : null)
+    },
+    [rnodes, hiddenIds]
+  )
+
   const handleExport = useCallback(
     async (format: ExportFormat, scale: number, quality?: number) => {
       if (!selectedLayer || !doc) return
@@ -691,7 +704,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
         toast(t('图层还在解析中，请稍后导出'), 'warning')
         return
       }
-      const canvas = renderLayerCanvas(selectedLayer, rnodes, hiddenIds)
+      const canvas = renderForExport(selectedLayer)
       if (!canvas) {
         toast(t('该图层没有可导出的位图内容（文本或空图层）'), 'warning')
         return
@@ -706,7 +719,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       const saved = await window.api.saveImage(`${safeName}@${scale}x.${extOf(format)}`, format, bytes)
       if (saved) toast(t('已导出 {file}', { file: `${safeName}@${scale}x.${extOf(format)}` }))
     },
-    [selectedLayer, doc, rnodes, hiddenIds, decoding, basisK, toast, t]
+    [selectedLayer, doc, renderForExport, decoding, basisK, toast, t]
   )
 
   const toggleHidden = useCallback(
@@ -766,7 +779,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
             ),
             run: async () => {
               // 走合成器出图：含蒙版、图层样式与剪贴，与画布所见一致；组节点合成整棵子树
-              const canvas = renderLayerCanvas(captured, rnodes, hiddenIds)
+              const canvas = renderForExport(captured)
               if (!canvas) return null
               return exportCanvasBytes(canvas, { scale: scale * basisK, format, quality })
             }
@@ -775,7 +788,7 @@ export default function DetailPage({ project, psd, onUpdatePsd, onBack }: Props)
       }
       return writeAll(items)
     },
-    [rnodes, hiddenIds, template, writeAll, decoding, basisK, toast, t]
+    [renderForExport, template, writeAll, decoding, basisK, toast, t]
   )
 
   const exportAll = useCallback(

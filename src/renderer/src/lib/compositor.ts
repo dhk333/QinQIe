@@ -773,8 +773,8 @@ function paintLeaf(t: PaintTarget, n: RNode, rc: RenderCtx): void {
   t.ctx.restore()
 }
 
-/** 剪贴裁切用的 alpha：基底的内容区域（不含投影，含描边） */
-function clipAlpha(n: RNode, rc: RenderCtx, within?: Rect | null): { canvas: LeafSource; x: number; y: number } | null {
+/** 剪贴裁切用的 alpha：基底的内容区域（不含投影，含描边）。导出单图层时也要它来裁 */
+export function clipAlpha(n: RNode, rc: RenderCtx, within?: Rect | null): { canvas: LeafSource; x: number; y: number } | null {
   if (n.kind === 'group') {
     const r = renderGroup(n, rc, within ?? null)
     if (!r) return null

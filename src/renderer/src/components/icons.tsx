@@ -67,6 +67,16 @@ export function ChevronDownIcon({ className }: IconProps) {
   )
 }
 
+/** 剪贴蒙版标记（PS 式弯钩箭头）：图层被下方基底裁切 */
+export function ClipMarkIcon({ className }: IconProps) {
+  return (
+    <svg className={className} {...svgProps}>
+      <path d="M9 4v7a3 3 0 0 0 3 3h5" />
+      <path d="M14.5 11.5 17.5 14l-3 2.5" />
+    </svg>
+  )
+}
+
 export function SearchIcon({ className }: IconProps) {
   return (
     <svg className={className} {...svgProps}>

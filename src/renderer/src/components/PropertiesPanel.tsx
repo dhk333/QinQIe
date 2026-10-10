@@ -5,6 +5,7 @@ import { loadExportPrefs } from '@/lib/exportPrefs'
 import type { CssUnit } from '@/lib/cssUnits'
 import { setUiPrefs, useUiPrefs } from '@/lib/uiPrefs'
 import { indexRNodes, measureLayerContent, renderLayerCanvas, type LayerBitmap } from '@/lib/psd'
+import { clipBaseOf, clipInfoOf } from '@/lib/clipping'
 import { fromBasis, toBasis } from '@/lib/basis'
 import { getLang, useT } from '@/i18n/core'
 import type { RNode } from '@/lib/compositor'
@@ -457,6 +458,16 @@ export default function PropertiesPanel({
 
   const rnodeMap = useMemo(() => indexRNodes(rnodes), [rnodes])
   const rnode = layer ? rnodeMap.get(layer.id) : undefined
+  /** 剪贴链/图层蒙版生效后的可见区域：面板读数、预览与导出都用它，和画布选框同一口径。
+   *  clipped 为真时说明这块区域确实被剪贴基底裁过，CSS 才额外注明（蒙版不参与 CSS） */
+  const visible = useMemo(() => {
+    if (!layer || layer.type === 'group') return null
+    const info = clipInfoOf(rnodes)
+    const box = info.boxes.get(layer.id)
+    if (!box) return null
+    const base = info.bases.get(layer.id)
+    return { box, baseName: base?.name, clipped: !!base }
+  }, [layer, rnodes])
   const color = useMemo(
     () => {
       const c = layer ? canvasMap.get(layer.id) : undefined
@@ -474,22 +485,40 @@ export default function PropertiesPanel({
     [layer, canvasMap]
   )
   const css = useMemo(
-    () => (layer ? layerCssSnippet(layer, color, rnode, cssUnits, canvasW || doc?.width, content, basisK) : ''),
+    () =>
+      layer
+        ? layerCssSnippet(
+            layer,
+            color,
+            rnode,
+            cssUnits,
+            canvasW || doc?.width,
+            content,
+            basisK,
+            visible?.clipped ? { box: visible.box, baseName: visible.baseName } : null
+          )
+        : '',
     // getLang(): CSS 注释内嵌展示标签，语言切换后需重新生成
-    [layer, color, rnode, cssUnits, doc?.width, canvasW, basisK, content, getLang()]
+    [layer, color, rnode, cssUnits, doc?.width, canvasW, basisK, content, visible, getLang()]
   )
   const setCssUnit = (unit: CssUnit) => setUiPrefs({ cssUnits: { ...cssUnits, unit } })
   const previewUrl = useMemo(() => {
     // 合成整层位图代价高：用户从未展开过预览就完全不跑
     if (!previewSeen || !layer || !doc) return null
     try {
-      const c = renderLayerCanvas(layer, rnodes, hiddenIds)
+      const base = visible?.clipped ? clipBaseOf(rnodes, layer.id) : null
+      const c = renderLayerCanvas(
+        layer,
+        rnodes,
+        hiddenIds,
+        base && visible ? { base, box: visible.box } : null
+      )
       if (!c || !c.width || !c.height) return null
       return c.toDataURL('image/png')
     } catch {
       return null
     }
-  }, [previewSeen, layer, doc, rnodes, hiddenIds])
+  }, [previewSeen, layer, doc, rnodes, hiddenIds, visible])
 
   if (!layer) {
     return (
@@ -549,10 +578,16 @@ export default function PropertiesPanel({
   const rawTop = layer.top + (content ? content.padT * sy : 0)
   const rawW = Math.max(1, content ? content.cw * sx : layer.width)
   const rawH = Math.max(1, content ? content.ch * sy : layer.height)
-  const shownLeft = toBasis(rawLeft, basisK)
-  const shownTop = toBasis(rawTop, basisK)
-  const shownW = toBasis(rawW, basisK)
-  const shownH = toBasis(rawH, basisK)
+  // 显示一律走「可见区域」：被剪贴的图层，画布选框、这里的读数、CSS 与导出是同一个矩形。
+  // 编辑仍作用在图层自身（改宽到基底以内会如实收缩，超过基底则被夹住），与 PS 的剪贴行为一致。
+  const visLeft = visible ? visible.box.left : rawLeft
+  const visTop = visible ? visible.box.top : rawTop
+  const visW = visible ? Math.max(1, visible.box.width) : rawW
+  const visH = visible ? Math.max(1, visible.box.height) : rawH
+  const shownLeft = toBasis(visLeft, basisK)
+  const shownTop = toBasis(visTop, basisK)
+  const shownW = toBasis(visW, basisK)
+  const shownH = toBasis(visH, basisK)
   const toBitmapW = (v: number) => {
     const doc = fromBasis(v, basisK)
     return Math.max(1, content && content.cw > 0 ? Math.round((doc * content.bw) / content.cw) : doc)
@@ -562,9 +597,10 @@ export default function PropertiesPanel({
     return Math.max(1, content && content.ch > 0 ? Math.round((doc * content.bh) / content.ch) : doc)
   }
   const setPos = (axis: 'dx' | 'dy', v: number) => {
-    const raw = axis === 'dx' ? rawLeft : rawTop
+    // 以可见区域为参照做位移：用户输入的是眼中那个框的位置，差值原样落到图层编辑上
+    const cur = axis === 'dx' ? visLeft : visTop
     const base = (axis === 'dx' ? edit?.dx : edit?.dy) ?? 0
-    patch({ [axis]: base + (fromBasis(v, basisK) - raw) } as Partial<LayerEdit>)
+    patch({ [axis]: base + (fromBasis(v, basisK) - cur) } as Partial<LayerEdit>)
   }
   const setW = (v: number) => {
     const width = toBitmapW(v)
@@ -628,7 +664,12 @@ export default function PropertiesPanel({
         {rnode && rnode.fillOpacity < 0.999 && (
           <InfoRow label={t('填充不透明度')} value={`${Math.round(rnode.fillOpacity * 100)}%`} />
         )}
-        {layer.clipping && <InfoRow label={t('剪贴蒙版')} value={t('是')} />}
+        {layer.clipping && (
+          <InfoRow
+            label={t('剪贴蒙版')}
+            value={visible?.baseName ? t('剪贴于「{name}」', { name: visible.baseName }) : t('是')}
+          />
+        )}
         {rnode?.mask && !rnode.mask.disabled && <InfoRow label={t('图层蒙版')} value={t('有')} />}
         {layerEffectNames(rnode).length > 0 && (
           <InfoRow label={t('图层样式')} value={layerEffectNames(rnode).join(t('、'))} />

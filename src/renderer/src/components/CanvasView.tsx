@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { DocSlice, PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from '@/lib/compositor'
-import { buildCompositeCanvas, flattenLayers, measureContentRect, readLayerPixels, type LayerBitmap } from '@/lib/psd'
+import { buildCompositeCanvas, flattenLayers, readLayerPixels, type LayerBitmap } from '@/lib/psd'
+import { clipInfoOf } from '@/lib/clipping'
 import { toBasis } from '@/lib/basis'
 import { HANDLE_CURSORS, toolCursorCss, useToolCursor } from '@/lib/cursors'
 import { useT } from '@/i18n/core'
@@ -213,8 +214,6 @@ export default function CanvasView({
   const drag = useRef<DragState | null>(null)
   /** 整篇合成结果：只在图层内容/显隐变化时重建，平移缩放只搬运这张图 */
   const composite = useRef<{ rnodes: RNode[]; hiddenIds: Set<number>; canvas: HTMLCanvasElement } | null>(null)
-  /** 每棵投影树的「可见内容框」测量缓存：位图不变则结果不变 */
-  const boxCache = useRef(new WeakMap<PsdLayer, { left: number; top: number; width: number; height: number }>())
   /** 当前工具的自绘光标（箭头 / 刀 / 滴管 / 手），PNG 光栅化好了才有值 */
   const toolCursor = useToolCursor(tool)
   /** 空格临时平移 = 抓手，直接借用它的光标 */
@@ -318,14 +317,10 @@ export default function CanvasView({
   // 选框/标注以「可见内容」为准：位图边界常含透明留白，直接画会比图形大一圈。
   // 编辑过的图层同样要量——投影后的 width 仍是位图边界，只有 alpha 才对应眼中的图形；
   // 留白按 图层宽/位图宽 缩放，重采样后依旧精确（组没有位图，度量返回 null 就照用图层边界）。
-  const layerBox = (l: PsdLayer) => {
-    let b = boxCache.current.get(l)
-    if (!b) {
-      b = measureContentRect(l, canvasMap) ?? l
-      boxCache.current.set(l, b)
-    }
-    return b
-  }
+  // 剪贴链与图层蒙版在这里一并生效：被剪贴的图层眼中就只有基底范围内那一块，
+  // 选框、标注、贴边目标、点选命中都按它出，才和画布画面、导出尺寸一致。
+  const clipBoxes = useMemo(() => clipInfoOf(rnodes).boxes, [rnodes])
+  const layerBox = (l: PsdLayer) => (l.children ? l : (clipBoxes.get(l.id) ?? l))
 
   /** 自动贴边目标：文档边缘 + 已有切片边缘 + 可见图层的可见内容框（layerBox 自带缓存）。
    *  拖拽开始时构建一次；excludeId 排除正在拖拽/缩放的切片自身的边缘，避免吸住原位 */
@@ -655,12 +650,14 @@ export default function CanvasView({
     for (let i = all.length - 1; i >= 0; i--) {
       const layer = all[i]
       if (layer.children || layer.hidden || hiddenIds.has(layer.id)) continue
-      if (
-        dx >= layer.left &&
-        dx <= layer.left + layer.width &&
-        dy >= layer.top &&
-        dy <= layer.top + layer.height
-      ) {
+      // 被剪贴的图层只在基底范围内存在：用可见框做候选判定，点基底以外不该选中它
+      const box = layer.clipping ? clipBoxes.get(layer.id) : null
+      if (layer.clipping && !box) continue
+      const bx = box?.left ?? layer.left
+      const by = box?.top ?? layer.top
+      const bw = box?.width ?? layer.width
+      const bh = box?.height ?? layer.height
+      if (dx >= bx && dx <= bx + bw && dy >= by && dy <= by + bh) {
         rectHits.push(layer)
       }
     }

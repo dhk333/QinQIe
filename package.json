@@ -1,6 +1,6 @@
 {
   "name": "qingqie",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "轻切 - 前端切图工具",
   "main": "./out/main/index.js",
   "author": "daihongkun",
@@ -14,7 +14,8 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "verify:psd": "node scripts/verify-fidelity.mjs",
     "verify:app": "node --import ./scripts/ts-resolve.mjs scripts/verify-app-path.mjs",
-    "verify": "npm run verify:psd && npm run verify:app",
+    "verify:clip": "node --import ./scripts/ts-resolve.mjs scripts/verify-clipping.mjs",
+    "verify": "npm run verify:psd && npm run verify:clip && npm run verify:app",
     "gen:icon": "node scripts/gen-icon.mjs && node scripts/gen-ico.mjs",
     "dist": "electron-vite build && node scripts/dist-retry.mjs",
     "postinstall": "patch-package"

@@ -1,6 +1,13 @@
 import { readPsd, type Layer, type Psd } from 'ag-psd'
 import type { PsdDoc, PsdLayer } from '@/types'
-import { compositeDocument, renderIsolated, type Env, type RNode } from './compositor'
+import {
+  clipAlpha,
+  compositeDocument,
+  renderIsolated,
+  type Env,
+  type RNode
+} from './compositor'
+import type { ClipBox } from './clipping'
 import { toRNodes, type LayerBitmap, type PixelEntry } from './psdDecode'
 
 export type { LayerBitmap } from './psdDecode'
@@ -468,23 +475,50 @@ export function buildCompositeCanvas(
 // 图层（或组合成图）→ 以图层范围裁剪的画布，供预览与导出共用。
 // 裁剪框取「图层 rect ∪ 烘焙 rect」：外描边、投影这类溢出图层边界的效果必须一起出图，
 // 没有外扩时两者相同，出图尺寸与旧版逐像素一致。
+// clip 传入时按剪贴基底再裁一次（destination-in），并收进基底的可见框——
+// 否则被剪贴的图层单出图会带着基底以外的像素，与画布所见不一致。
 export function renderLayerCanvas(
   layer: PsdLayer,
   rnodes: RNode[],
-  hiddenIds: Set<number>
+  hiddenIds: Set<number>,
+  clip?: { base: RNode; box: ClipBox } | null
 ): HTMLCanvasElement | null {
   const node = indexRNodes(rnodes).get(layer.id)
   if (!node) return null
   const r = renderIsolated(node, { env: browserEnv, hiddenIds })
   if (!r) return null
-  const x = Math.min(layer.left, r.rect.x)
-  const y = Math.min(layer.top, r.rect.y)
+  const x0 = Math.min(layer.left, r.rect.x)
+  const y0 = Math.min(layer.top, r.rect.y)
+  const w = Math.max(1, Math.round(Math.max(layer.left + layer.width, r.rect.x + r.rect.w) - x0))
+  const h = Math.max(1, Math.round(Math.max(layer.top + layer.height, r.rect.y + r.rect.h) - y0))
+  const alpha = clip ? clipAlpha(clip.base, { env: browserEnv, hiddenIds }) : null
   const out = document.createElement('canvas')
-  out.width = Math.max(1, Math.round(Math.max(layer.left + layer.width, r.rect.x + r.rect.w) - x))
-  out.height = Math.max(1, Math.round(Math.max(layer.top + layer.height, r.rect.y + r.rect.h) - y))
+  if (alpha && clip) {
+    const l = Math.max(x0, clip.box.left)
+    const t = Math.max(y0, clip.box.top)
+    const rw = Math.round(Math.min(x0 + w, clip.box.left + clip.box.width) - l)
+    const rh = Math.round(Math.min(y0 + h, clip.box.top + clip.box.height) - t)
+    // 剪贴层单出图：先落自身内容，再按基底 alpha 裁掉基底以外的像素，出图正好是可见框
+    if (rw < 1 || rh < 1) return null
+    out.width = rw
+    out.height = rh
+    const ctx = out.getContext('2d')
+    const buf = document.createElement('canvas')
+    buf.width = w
+    buf.height = h
+    const bctx = buf.getContext('2d')
+    if (!ctx || !bctx) return null
+    bctx.drawImage(r.canvas as unknown as CanvasImageSource, Math.round(r.rect.x - x0), Math.round(r.rect.y - y0))
+    bctx.globalCompositeOperation = 'destination-in'
+    bctx.drawImage(alpha.canvas as unknown as CanvasImageSource, Math.round(alpha.x - x0), Math.round(alpha.y - y0))
+    ctx.drawImage(buf, Math.round(l - x0), Math.round(t - y0), rw, rh, 0, 0, rw, rh)
+    return out
+  }
+  out.width = w
+  out.height = h
   const ctx = out.getContext('2d')
   if (!ctx) return null
-  ctx.drawImage(r.canvas as unknown as HTMLCanvasElement, Math.round(r.rect.x - x), Math.round(r.rect.y - y))
+  ctx.drawImage(r.canvas as unknown as CanvasImageSource, Math.round(r.rect.x - x0), Math.round(r.rect.y - y0))
   return out
 }
 

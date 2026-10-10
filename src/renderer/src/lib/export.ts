@@ -146,7 +146,9 @@ export function layerCssSnippet(
   docWidth?: number | null,
   content?: LayerContent | null,
   /** 切图基准宽度倍率（见 lib/basis.ts）：CSS 要落在页面上，所以全部长度按基准口径给 */
-  basisK = 1
+  basisK = 1,
+  /** 剪贴链/图层蒙版生效后的可见区域：CSS 的 left/top/width/height 以它为准，才和画布选框一致 */
+  clip?: { box: { left: number; top: number; width: number; height: number }; baseName?: string } | null
 ): string {
   const len = (px: number) => fmtLen(px * basisK, units, docWidth)
   const lines: string[] = []
@@ -157,10 +159,23 @@ export function layerCssSnippet(
   // 编辑重采样后位图与内容各自缩放，所以留白按 图层宽/位图宽 的比例换算到文档坐标。
   const sx = content && content.bw > 0 ? layer.width / content.bw : 1
   const sy = content && content.bh > 0 ? layer.height / content.bh : 1
-  const boxLeft = Math.round(layer.left + (content ? content.padL * sx : 0))
-  const boxTop = Math.round(layer.top + (content ? content.padT * sy : 0))
-  const boxW = Math.max(1, Math.round(content ? content.cw * sx : layer.width))
-  const boxH = Math.max(1, Math.round(content ? content.ch * sy : layer.height))
+  const rawLeft = Math.round(layer.left + (content ? content.padL * sx : 0))
+  const rawTop = Math.round(layer.top + (content ? content.padT * sy : 0))
+  const rawW = Math.max(1, Math.round(content ? content.cw * sx : layer.width))
+  const rawH = Math.max(1, Math.round(content ? content.ch * sy : layer.height))
+  let boxLeft = rawLeft
+  let boxTop = rawTop
+  let boxW = rawW
+  let boxH = rawH
+  if (clip) {
+    boxLeft = Math.round(clip.box.left)
+    boxTop = Math.round(clip.box.top)
+    boxW = Math.max(1, Math.round(clip.box.width))
+    boxH = Math.max(1, Math.round(clip.box.height))
+    lines.push(
+      `/* 被剪贴蒙版${clip.baseName ? `「${clip.baseName}」` : ''}裁切，以下为可见区域；图层自身 X ${rawLeft} Y ${rawTop} ${rawW}×${rawH} */`
+    )
+  }
   // 换算过口径（非 px 单位、或走了切图基准宽度）就留一行 PSD 原始像素值，方便回查核对
   if (units.unit !== 'px' || basisK !== 1) {
     const note: string[] = []

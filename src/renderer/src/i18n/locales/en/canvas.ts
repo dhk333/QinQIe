@@ -20,6 +20,9 @@ export default {
   '填充不透明度': 'Fill opacity',
   '混合模式': 'Blend mode',
   '剪贴蒙版': 'Clipping mask',
+  '剪贴于「{name}」': 'Clipped by “{name}”',
+  '该图层被下方基底图层裁切，选框与导出都按可见区域':
+    'This layer is clipped by the base layer below — the selection, readouts and export all follow the visible area',
   '是': 'Yes',
   '图层蒙版': 'Layer mask',
   '有': 'Applied',

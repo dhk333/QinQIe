@@ -4,6 +4,7 @@ import { useT } from '@/i18n/core'
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  ClipMarkIcon,
   EyeIcon,
   EyeOffIcon,
   FolderIcon,
@@ -68,6 +69,7 @@ function Row({
   onToggleHidden: (id: number) => void
   onContextMenu?: Props['onContextMenu']
 }) {
+  const t = useT()
   const isHidden = layer.hidden || hiddenIds.has(layer.id)
   const isCollapsed = collapsed.has(layer.id) && !searching
   const isSelected = selectedIds.has(layer.id)
@@ -108,6 +110,14 @@ function Row({
           <span className="w-4 shrink-0" />
         )}
         <LayerIcon layer={layer} />
+        {layer.clipping && (
+          <span
+            className="shrink-0 text-txt-3"
+            title={t('该图层被下方基底图层裁切，选框与导出都按可见区域')}
+          >
+            <ClipMarkIcon className="h-3 w-3" />
+          </span>
+        )}
         <span className={`flex-1 truncate ${isHidden ? 'line-through opacity-40' : ''}`}>
           {layer.name}
         </span>
