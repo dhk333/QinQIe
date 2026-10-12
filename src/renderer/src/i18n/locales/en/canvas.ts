@@ -39,6 +39,7 @@ export default {
   '行距': 'Line height',
   '字距': 'Letter spacing',
   '复制 CSS': 'Copy CSS',
+  '点击复制该行': 'Click to copy this line',
   '导出设置': 'Export',
   '预览': 'Preview',
   '该图层暂无位图内容': 'No bitmap content for this layer',

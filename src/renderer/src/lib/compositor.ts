@@ -630,6 +630,34 @@ function hasEffects(e?: EffectInfo | null): boolean {
   return !!e && !!(e.dropShadow?.some((s) => s.enabled) || e.innerShadow?.some((s) => s.enabled) || e.outerGlow?.enabled || e.innerGlow?.enabled || e.stroke?.some((s) => s.enabled) || e.solidFill?.some((s) => s.enabled) || e.gradientOverlay?.some((s) => s.enabled))
 }
 
+/**
+ * 叠加类样式（颜色叠加 / 渐变叠加）逐像素混色：PS 只替换内容颜色、保留内容 alpha。
+ * 用 drawImage 叠一层会把 alpha 也叠加，半透明内容（如 40% 不透明度的按钮描边环）会整体压深一档。
+ */
+function mixOverlay(ctx: RasterCtx, w: number, h: number, plane: Float64Array, tint: RasterCanvas, q: number): void {
+  const base = ctx.getImageData(0, 0, w, h)
+  const d = base.data
+  const td = tint.getContext('2d').getImageData(0, 0, w, h).data
+  for (let p = 0; p < plane.length; p++) {
+    if (plane[p] <= 0) continue
+    const i = p * 4
+    const a = (td[i + 3] / 255) * q
+    if (a <= 0) continue
+    d[i] += (td[i] - d[i]) * a
+    d[i + 1] += (td[i + 1] - d[i + 1]) * a
+    d[i + 2] += (td[i + 2] - d[i + 2]) * a
+  }
+  ctx.putImageData(base, 0, 0)
+}
+
+function solidTint(env: Env, color: { r: number; g: number; b: number }, w: number, h: number): RasterCanvas {
+  const c = env.createCanvas(w, h)
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = `rgb(${px(color.r)},${px(color.g)},${px(color.b)})`
+  ctx.fillRect(0, 0, w, h)
+  return c
+}
+
 /** 内容位图 + 图层样式 → 最终位图；(cx,cy) 为内容左上角的文档坐标，rect 为目标区域（含外扩） */
 function bake(
   env: Env,
@@ -661,11 +689,23 @@ function bake(
   const alpha = canvasAlpha(env, inner)
   const outer = padPlane(alpha, rect.w, rect.h, ox, oy)
 
+  // 叠加类样式先烘进内容层，再与投影/描边一起落笔
+  const fills = (e?.solidFill ?? []).filter((f) => f.enabled)
+  const grads = (e?.gradientOverlay ?? []).filter((g) => g.enabled)
+  let body: RasterCanvas = inner
+  if (fills.length || grads.length) {
+    body = env.createCanvas(alpha.w, alpha.h)
+    const bctx = body.getContext('2d')
+    bctx.drawImage(inner, 0, 0)
+    for (const f of fills) mixOverlay(bctx, alpha.w, alpha.h, alpha.plane, solidTint(env, f.color, alpha.w, alpha.h), f.opacity)
+    for (const g of grads) mixOverlay(bctx, alpha.w, alpha.h, alpha.plane, gradientCanvas(env, g, alpha.w, alpha.h), g.opacity)
+  }
+
   for (const s of e?.dropShadow ?? []) if (s.enabled) drawShadowLayer(ctx, env, s, outer, 0, 0)
   if (e?.outerGlow?.enabled) drawGlowLayer(ctx, env, e?.outerGlow, outer, 0, 0)
   ctx.save()
   ctx.globalAlpha = fill
-  ctx.drawImage(inner, ox, oy)
+  ctx.drawImage(body, ox, oy)
   ctx.restore()
 
   for (const s of e?.innerShadow ?? []) {
@@ -675,29 +715,6 @@ function bake(
   }
   const ig = e?.innerGlow
   if (ig?.enabled) drawInnerLayer(ctx, env, { ...ig, size: ig.size, choke: ig.choke }, alpha, ox, oy, 0, 0)
-  for (const f of e?.solidFill ?? []) {
-    if (!f.enabled) continue
-    const tint = tinted(env, alpha.plane, alpha.w, alpha.h, f.color, f.opacity)
-    ctx.save()
-    ctx.globalCompositeOperation = blendOf(f.blendMode)
-    ctx.drawImage(tint, ox, oy)
-    ctx.restore()
-  }
-  for (const g of e?.gradientOverlay ?? []) {
-    if (!g.enabled) continue
-    const grad = gradientCanvas(env, g, alpha.w, alpha.h)
-    const gc = env.createCanvas(alpha.w, alpha.h)
-    const gctx = gc.getContext('2d')
-    gctx.drawImage(grad, 0, 0)
-    gctx.globalCompositeOperation = 'destination-in'
-    gctx.drawImage(inner, 0, 0)
-    gctx.globalCompositeOperation = 'source-atop'
-    gctx.globalAlpha = g.opacity
-    ctx.save()
-    ctx.globalCompositeOperation = blendOf(g.blendMode)
-    ctx.drawImage(gc, ox, oy)
-    ctx.restore()
-  }
   for (const s of e?.stroke ?? []) if (s.enabled) drawStroke(ctx, env, s, alpha, ox, oy)
   return c
 }
@@ -1111,22 +1128,24 @@ export function buildRNode(layer: AgLikeLayer, idFor: (l: AgLikeLayer) => number
     clipping: !!layer.clipping,
     blendMode: layer.blendMode ?? 'normal',
     canvas: (layer.canvas as LeafSource | undefined) ?? null,
-    mask: layer.mask
-      ? {
-          left: layer.mask.left ?? 0,
-          top: layer.mask.top ?? 0,
-          right: layer.mask.right ?? 0,
-          bottom: layer.mask.bottom ?? 0,
-          defaultColor: layer.mask.defaultColor ?? 0,
-          disabled: !!layer.mask.disabled,
-          canvas: (layer.mask.canvas as LeafSource | undefined) ?? null
-        }
-      : null,
+    mask: (m =>
+      m
+        ? {
+            left: m.left ?? 0,
+            top: m.top ?? 0,
+            right: m.right ?? 0,
+            bottom: m.bottom ?? 0,
+            defaultColor: m.defaultColor ?? 0,
+            disabled: !!m.disabled,
+            canvas: (m.canvas as LeafSource | undefined) ?? null
+          }
+        : null)(effectiveMask(layer)),
     shapeLayer: !!layer.vectorFill,
     children
   }
   const e = layer.effects
-  if (e) {
+  // 总开关关掉的样式一律不挂：PS 自己就不画，我们照画会让按钮这类元素比设计稿亮一档
+  if (e && !e.disabled) {
     const fx: EffectInfo = {}
     if (e.dropShadow?.length) fx.dropShadow = e.dropShadow.map(toShadow)
     if (e.innerShadow?.length) fx.innerShadow = e.innerShadow.map(toShadow)
@@ -1154,6 +1173,17 @@ export function buildRNode(layer: AgLikeLayer, idFor: (l: AgLikeLayer) => number
   return node
 }
 
+/**
+ * 生效的像素蒙版。PS 存盘时形状图层位图已经带了自己矢量路径的覆盖值，mask 通道只是该路径的镜像
+ * （fromVectorData）；再拿它裁一次会把 AA 边缘的 alpha 平方，边缘变细变淡。真正叠加的用户蒙版在 realMask。
+ */
+function effectiveMask(layer: AgLikeLayer): AgLikeLayer['mask'] {
+  const m = layer.realMask ?? layer.mask
+  if (!m?.canvas) return null
+  if (m.fromVectorData && (layer.vectorFill || layer.vectorMask)) return null
+  return m
+}
+
 /** buildRNode 需要的 ag-psd Layer 字段子集（避免直接依赖 ag-psd 的具体类型版本） */
 export interface AgLikeLayer {
   name?: string
@@ -1167,6 +1197,7 @@ export interface AgLikeLayer {
   clipping?: boolean
   blendMode?: string
   vectorFill?: unknown
+  vectorMask?: unknown
   canvas?: unknown
   mask?: {
     left?: number
@@ -1175,13 +1206,17 @@ export interface AgLikeLayer {
     bottom?: number
     defaultColor?: number
     disabled?: boolean
+    fromVectorData?: boolean
     canvas?: unknown
   } | null
+  realMask?: AgLikeLayer['mask']
   effects?: AgEffects | null
   children?: AgLikeLayer[]
 }
 
 export interface AgEffects {
+  /** PS 图层面板里「效果」一行的总开关：关掉时整组样式不参与合成 */
+  disabled?: boolean
   dropShadow?: AgShadow[]
   innerShadow?: AgShadow[]
   outerGlow?: AgShadow

@@ -2,7 +2,7 @@ import type { ExportFormat, PsdLayer } from '@/types'
 import type { RNode } from './compositor'
 import { readLayerPixels, type LayerBitmap, type LayerContent } from './psd'
 import { t } from '@/i18n/core'
-import { cssUnitBase, fmtLen, type CssUnitsPrefs } from './cssUnits'
+import { fmtLen, type CssUnitsPrefs } from './cssUnits'
 import { getUiPrefs } from './uiPrefs'
 
 function canvasToBlob(canvas: HTMLCanvasElement, format: ExportFormat, quality?: number): Promise<Blob | null> {
@@ -119,6 +119,16 @@ function fxColor(c: { r: number; g: number; b: number }, opacity: number): strin
   return `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${Math.round(a * 100) / 100})`
 }
 
+/** #RGB / #RRGGBB → rgb 三元组；解析不出来返回 null */
+function parseHex(hex: string): { r: number; g: number; b: number } | null {
+  const m = /^#?([\da-f]{3}|[\da-f]{6})$/i.exec(hex.trim())
+  if (!m) return null
+  const s = m[1]
+  const h = s.length === 3 ? s.replace(/./g, (c) => c + c) : s
+  const n = parseInt(h, 16)
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }
+}
+
 const n1 = (v: number) => Math.round(v * 10) / 10
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -147,78 +157,61 @@ export function layerCssSnippet(
   content?: LayerContent | null,
   /** 切图基准宽度倍率（见 lib/basis.ts）：CSS 要落在页面上，所以全部长度按基准口径给 */
   basisK = 1,
-  /** 剪贴链/图层蒙版生效后的可见区域：CSS 的 left/top/width/height 以它为准，才和画布选框一致 */
-  clip?: { box: { left: number; top: number; width: number; height: number }; baseName?: string } | null
+  /** 剪贴链/图层蒙版生效后的可见区域：CSS 的 width/height 以它为准，才和画布选框一致 */
+  clip?: { box: { width: number; height: number } } | null
 ): string {
   const len = (px: number) => fmtLen(px * basisK, units, docWidth)
-  const lines: string[] = []
-  const kind = layer.type === 'group' ? '图层组' : layer.isText ? '文本图层' : '像素图层'
-  const tags = [kind, layer.hidden ? '已隐藏' : null, layer.clipping ? '剪贴蒙版' : null].filter(Boolean)
-  lines.push(`/* ${layer.name} · ${tags.join(' · ')} */`)
   // 写 CSS 要的是「用户眼里的图形」：位图边界常带透明留白，直接照抄会比设计稿宽几个像素。
   // 编辑重采样后位图与内容各自缩放，所以留白按 图层宽/位图宽 的比例换算到文档坐标。
   const sx = content && content.bw > 0 ? layer.width / content.bw : 1
   const sy = content && content.bh > 0 ? layer.height / content.bh : 1
-  const rawLeft = Math.round(layer.left + (content ? content.padL * sx : 0))
-  const rawTop = Math.round(layer.top + (content ? content.padT * sy : 0))
   const rawW = Math.max(1, Math.round(content ? content.cw * sx : layer.width))
   const rawH = Math.max(1, Math.round(content ? content.ch * sy : layer.height))
-  let boxLeft = rawLeft
-  let boxTop = rawTop
-  let boxW = rawW
-  let boxH = rawH
-  if (clip) {
-    boxLeft = Math.round(clip.box.left)
-    boxTop = Math.round(clip.box.top)
-    boxW = Math.max(1, Math.round(clip.box.width))
-    boxH = Math.max(1, Math.round(clip.box.height))
-    lines.push(
-      `/* 被剪贴蒙版${clip.baseName ? `「${clip.baseName}」` : ''}裁切，以下为可见区域；图层自身 X ${rawLeft} Y ${rawTop} ${rawW}×${rawH} */`
-    )
-  }
-  // 换算过口径（非 px 单位、或走了切图基准宽度）就留一行 PSD 原始像素值，方便回查核对
-  if (units.unit !== 'px' || basisK !== 1) {
-    const note: string[] = []
-    if (basisK !== 1)
-      note.push(`基准 ${Math.round(docWidth ?? 0)}px（设计稿 ×${Math.round(basisK * 1000) / 1000}）`)
-    if (units.unit !== 'px') note.push(`单位 ${units.unit} · 基准 ${cssUnitBase(units, docWidth)}px`)
-    lines.push(
-      `/* ${note.join(' · ')} · PSD 图层边界 X ${layer.left} Y ${layer.top} ${layer.width}×${layer.height} */`
-    )
-  }
-  lines.push('position: absolute;')
-  lines.push(`left: ${len(boxLeft)};`)
-  lines.push(`top: ${len(boxTop)};`)
-  lines.push(`width: ${len(boxW)};`)
-  lines.push(`height: ${len(boxH)};`)
-  // 圆角优先取面板编辑值（按短边钳制过写在合成器节点上），没编辑就用位图反推的原值
-  const radius = rnode?.radius ?? (layer.type === 'group' ? 0 : content?.radius ?? 0)
-  if (radius) lines.push(`border-radius: ${len(radius)};`)
-  if (layer.opacity < 0.999) lines.push(`opacity: ${Math.round(layer.opacity * 1000) / 1000};`)
-  const cssBlend = BLEND_CSS[layer.blendMode]
-  if (cssBlend) lines.push(`mix-blend-mode: ${cssBlend};`)
-  else if (layer.blendMode !== 'normal' && layer.blendMode !== 'pass through')
-    lines.push(`/* 混合模式「${blendLabel(layer.blendMode)}」，CSS 无等价实现 */`)
-  if (rnode && rnode.fillOpacity < 0.999)
-    lines.push(`/* 填充不透明度 ${pct(rnode.fillOpacity)}，CSS 无独立等价 */`)
-  if (rnode?.mask && !rnode.mask.disabled) lines.push('/* 含图层蒙版，非矩形区域需导出图片 */')
+  // 只给尺寸不给 left/top：定位由使用者的布局决定，绝对坐标写死反而没人会用
+  const boxW = Math.max(1, Math.round(clip ? clip.box.width : rawW))
+  const boxH = Math.max(1, Math.round(clip ? clip.box.height : rawH))
+  // 输出顺序按使用者关心的程度排：尺寸 → 字体 → 圆角 → 投影 → 背景 → 其他 → 说明注释。
+  // 面板标题已经写了图层名与类型，片段里不再重复注释头；只有 CSS 表达不了的信息才留行尾说明。
+  const width: string[] = [`width: ${len(boxW)};`, `height: ${len(boxH)};`]
+  const text: string[] = []
+  const round: string[] = []
+  const shadows: string[] = []
+  const bg: string[] = []
+  const extra: string[] = []
+  const notes: string[] = []
+
+  // 文本图层的不透明度折进 color 的 alpha（PS 里文字层的「不透明度」就是字色透明度），
+  // 比给整层套 opacity 更好抄；折过了就不再重复输出 opacity 行
+  const alpha = layer.opacity < 0.999 ? Math.round(layer.opacity * 100) / 100 : 1
+  let alphaFolded = false
 
   if (layer.isText && layer.textInfo) {
     const ti = layer.textInfo
-    if (ti.fontSize) lines.push(`font-size: ${len(ti.fontSize)};`)
     if (ti.fontFamily) {
       const fam = ti.fontFamily.replace(/-(Bold|Light|Regular|Medium|Thin|Black|Heavy)$/i, '')
-      lines.push(`font-family: '${fam}', sans-serif;`)
+      text.push(`font-family: '${fam}', sans-serif;`)
     }
-    if (ti.fontWeight === 'bold') lines.push('font-weight: 700;')
-    if (ti.color) lines.push(`color: ${ti.color};`)
+    if (ti.fontSize) text.push(`font-size: ${len(ti.fontSize)};`)
+    if (ti.color) {
+      const c = parseHex(ti.color)
+      if (c) {
+        text.push(`color: ${fxColor(c, alpha)};`)
+        alphaFolded = true
+      } else text.push(`color: ${ti.color};`)
+    }
     if (ti.leading && ti.fontSize && Math.abs(ti.leading - ti.fontSize) > 0.5)
-      lines.push(`line-height: ${len(ti.leading)};`)
+      text.push(`line-height: ${len(ti.leading)};`)
+    if (ti.fontWeight === 'bold') text.push('font-weight: 700;')
     if (ti.tracking)
-      lines.push(`letter-spacing: ${Math.round((ti.tracking / 1000) * 1000) / 1000}em;`)
+      text.push(`letter-spacing: ${Math.round((ti.tracking / 1000) * 1000) / 1000}em;`)
   } else if (color) {
-    lines.push(`background-color: ${color};`)
+    bg.push(`background-color: ${color};`)
   }
+
+  // 圆角优先取面板编辑值（按短边钳制过写在合成器节点上），没编辑就用位图反推的原值；
+  // 文本图层不给圆角——字形外框的圆角是被字形轮廓反推出来的假值，写出去没有意义
+  const radius = rnode?.radius ?? (layer.type === 'group' ? 0 : content?.radius ?? 0)
+  if (radius && !layer.isText) round.push(`border-radius: ${len(radius)};`)
 
   const fx = rnode?.effects
   if (fx) {
@@ -232,37 +225,50 @@ export function layerCssSnippet(
       }
     if (fx.outerGlow?.enabled)
       filters.push(`drop-shadow(0 0 ${len(fx.outerGlow.size)} ${fxColor(fx.outerGlow.color, fx.outerGlow.opacity)})`)
-    if (filters.length) lines.push(`filter: ${filters.join(', ')};`)
+    if (filters.length) shadows.push(`filter: ${filters.join(', ')};`)
 
-    const shadows: string[] = []
+    const inset: string[] = []
     for (const sh of fx.innerShadow ?? [])
       if (sh.enabled) {
         const rad = (sh.angle * Math.PI) / 180
-        shadows.push(
+        inset.push(
           `inset ${len(-sh.distance * Math.cos(rad))} ${len(sh.distance * Math.sin(rad))} ${len(sh.size)} ${fxColor(sh.color, sh.opacity)}`
         )
       }
     if (fx.innerGlow?.enabled)
-      shadows.push(`inset 0 0 ${len(fx.innerGlow.size)} ${fxColor(fx.innerGlow.color, fx.innerGlow.opacity)}`)
-    if (shadows.length) lines.push(`box-shadow: ${shadows.join(', ')}; /* 内阴影/内发光（矩形近似） */`)
+      inset.push(`inset 0 0 ${len(fx.innerGlow.size)} ${fxColor(fx.innerGlow.color, fx.innerGlow.opacity)}`)
+    if (inset.length) shadows.push(`box-shadow: ${inset.join(', ')}; /* 内阴影/内发光（矩形近似） */`)
 
     for (const st of fx.stroke ?? [])
       if (st.enabled)
-        lines.push(
+        extra.push(
           `border: ${len(st.size)} solid ${fxColor(st.color, st.opacity)}; /* 描边 ${st.position === 'inside' ? '内侧' : st.position === 'center' ? '居中' : '外侧'} */`
         )
     for (const sf of fx.solidFill ?? [])
       if (sf.enabled) {
-        if (layer.isText) lines.push(`color: ${fxColor(sf.color, sf.opacity)}; /* 颜色叠加 */`)
-        else lines.push(`/* 颜色叠加 ${fxColor(sf.color, sf.opacity)}，位图需导出图片 */`)
+        if (layer.isText) {
+          text.push(`color: ${fxColor(sf.color, sf.opacity * alpha)}; /* 颜色叠加 */`)
+          alphaFolded = true
+        } else notes.push(`/* 颜色叠加 ${fxColor(sf.color, sf.opacity)}，位图需导出图片 */`)
       }
     for (const g of fx.gradientOverlay ?? [])
       if (g.enabled && g.stops.length) {
         const stops = (g.reverse ? [...g.stops].reverse() : g.stops)
           .map((x) => `${fxColor(x.color, g.opacity)} ${Math.round(x.location * 100)}%`)
           .join(', ')
-        lines.push(`background-image: linear-gradient(${n1(((90 - g.angle) % 360 + 360) % 360)}deg, ${stops}); /* 渐变叠加（近似） */`)
+        bg.push(`background-image: linear-gradient(${n1(((90 - g.angle) % 360 + 360) % 360)}deg, ${stops}); /* 渐变叠加（近似） */`)
       }
   }
-  return lines.join('\n')
+
+  if (layer.opacity < 0.999 && !alphaFolded)
+    extra.push(`opacity: ${Math.round(layer.opacity * 1000) / 1000};`)
+  const cssBlend = BLEND_CSS[layer.blendMode]
+  if (cssBlend) extra.push(`mix-blend-mode: ${cssBlend};`)
+  else if (layer.blendMode !== 'normal' && layer.blendMode !== 'pass through')
+    notes.push(`/* 混合模式「${blendLabel(layer.blendMode)}」，CSS 无等价实现 */`)
+  if (rnode && rnode.fillOpacity < 0.999)
+    notes.push(`/* 填充不透明度 ${pct(rnode.fillOpacity)}，CSS 无独立等价 */`)
+  if (rnode?.mask && !rnode.mask.disabled) notes.push('/* 含图层蒙版，非矩形区域需导出图片 */')
+
+  return [...width, ...text, ...round, ...shadows, ...bg, ...extra, ...notes].join('\n')
 }

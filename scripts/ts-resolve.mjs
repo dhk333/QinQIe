@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url'
 // 应用内模块互相 import 时都不写扩展名，Node 需要补上 .ts。
 // 判据用「同目录是否真有这个 .ts 文件」而不是「spec 看着像不像带扩展名」：
 // './psd'、'./clipping' 这类模块名本身就含点，按正则判断会误认为已带扩展名。
+// 顺带说明：走 '@/' 别名的模块（如 lib/export.ts）在本机跑不起来——它们间接 import i18n/core.ts，
+// 那份多语言字典靠 Vite 的 import.meta.glob 在构建期展开，Node 里没有这个钩子。
 registerHooks({
   resolve(spec, ctx, next) {
     if (spec.startsWith('.') && ctx.parentURL?.startsWith('file:') && !spec.endsWith('.ts')) {

@@ -60,6 +60,7 @@ function readTextInfo(text: unknown): PsdLayer['textInfo'] {
     content?: string
     style?: Record<string, unknown>
     styles?: Record<string, unknown>[]
+    transform?: number[]
   }
   const st = t.style ?? t.styles?.[0] ?? {}
   const fc = st.fillColor as { r?: number; g?: number; b?: number } | undefined
@@ -78,13 +79,20 @@ function readTextInfo(text: unknown): PsdLayer['textInfo'] {
     weight === true ||
     (typeof weight === 'number' && weight >= 700) ||
     /bold|heavy|black|-b\b/i.test(fontName ?? '')
+  // style.fontSize 只是「打字时的字号」：自由变换缩字写在 transform 里、纵向缩放写在
+  // verticalScale 里（1 = 100%），设计稿上真正看到的字号是三者相乘的结果
+  const scale =
+    (typeof t.transform?.[3] === 'number' ? t.transform[3] : 1) *
+    (typeof st.verticalScale === 'number' ? st.verticalScale : 1)
+  const eff = (v: unknown) =>
+    typeof v === 'number' ? Math.round(v * scale * 10) / 10 : undefined
   return {
     content: t.text ?? t.content ?? '',
-    fontSize: typeof st.fontSize === 'number' ? Math.round(st.fontSize) : undefined,
+    fontSize: eff(st.fontSize),
     color,
     fontFamily: fontName,
     fontWeight: isBold ? 'bold' : 'normal',
-    leading: typeof st.leading === 'number' ? st.leading : undefined,
+    leading: eff(st.leading),
     tracking: typeof st.tracking === 'number' ? st.tracking : undefined
   }
 }

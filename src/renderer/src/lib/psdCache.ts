@@ -6,7 +6,11 @@ import type { PsdDoc, PsdLayer } from '@/types'
 import type { RNode } from './compositor'
 
 export interface PsdCacheEntry {
-  v: 1
+  /**
+   * rnodes 里带着图层样式（effects）、tree 里带着 textInfo 读数，
+   * 合成语义或解析口径（如文本有效字号）一变，旧条目就是错的，必须靠这个版本号整批失效。
+   */
+  v: 3
   doc: PsdDoc
   tree: PsdLayer[]
   rnodes: RNode[]
@@ -18,7 +22,7 @@ export async function readPsdCache(
   try {
     const res = await window.api.psdCacheRead(path)
     const entry = res?.entry as PsdCacheEntry | undefined
-    if (!res?.hit || entry?.v !== 1 || !entry.tree?.length || !Array.isArray(entry.rnodes)) {
+    if (!res?.hit || entry?.v !== 3 || !entry.tree?.length || !Array.isArray(entry.rnodes)) {
       return null
     }
     let preview: HTMLCanvasElement | null = null
@@ -79,7 +83,7 @@ export function writePsdCache(
         }
       }
       if (!preview) return // 无预览的条目读回来永远 miss，写了也白写
-      const entry: PsdCacheEntry = { v: 1, doc, tree, rnodes: stripRNodeCanvases(rnodes) }
+      const entry: PsdCacheEntry = { v: 3, doc, tree, rnodes: stripRNodeCanvases(rnodes) }
       await window.api.psdCacheWrite(path, { entry, preview })
     } catch {
       // 缓存失败不影响本次打开

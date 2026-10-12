@@ -403,13 +403,34 @@ function valueTokens(raw: string): React.ReactNode[] {
 }
 
 function CssCode({ css }: { css: string }) {
+  const t = useT()
+  const [copied, setCopied] = useState(-1)
+  const copyLine = async (line: string, i: number) => {
+    // 拖动选多行时松手也会派发 click，别把用户选好的整段换成单行
+    if (window.getSelection()?.toString()) return
+    await navigator.clipboard.writeText(line)
+    setCopied(i)
+    setTimeout(() => setCopied(-1), 1200)
+  }
   return (
     <div className="css-hl">
       {css.split('\n').map((ln, i) => {
         const m = /^([a-z-]+)(:)([\s\S]*)$/i.exec(ln)
         return (
-          <div className="cl" key={i}>
-            <span className="ln">{i + 1}</span>
+          <div
+            className="cl"
+            key={i}
+            role="button"
+            title={t('点击复制该行')}
+            onClick={() => copyLine(ln, i)}
+          >
+            <span className="ln">
+              {copied === i ? (
+                <CheckIcon className="inline-block h-3 w-3 -mt-0.5 text-emerald-400" />
+              ) : (
+                i + 1
+              )}
+            </span>
             <span className="ct">
               {m ? (
                 <>
@@ -495,7 +516,7 @@ export default function PropertiesPanel({
             canvasW || doc?.width,
             content,
             basisK,
-            visible?.clipped ? { box: visible.box, baseName: visible.baseName } : null
+            visible?.clipped ? { box: visible.box } : null
           )
         : '',
     // getLang(): CSS 注释内嵌展示标签，语言切换后需重新生成
@@ -991,7 +1012,7 @@ export default function PropertiesPanel({
               <CopyIcon className="h-3.5 w-3.5" />
             )}
           </button>
-          <CssCode css={css} />
+          <CssCode key={css} css={css} />
         </div>
       </Section>
 

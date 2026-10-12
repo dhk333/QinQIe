@@ -734,17 +734,22 @@ body {
 @media (prefers-reduced-motion: reduce) { .logo-draw path { animation: logo-draw 4s linear infinite !important; } }
 
 /* CSS 代码高亮块：全局 body 禁了选区，这里放行让鼠标能框选复制 */
+/* 右侧留出「复制 CSS」按钮的位置，否则长行会折到按钮底下 */
 .css-hl {
-  user-select: text; cursor: text; overflow-x: auto;
+  user-select: text;
   font-family: Consolas, 'JetBrains Mono', monospace; font-size: 11px; line-height: 20px;
-  padding: 10px 12px 10px 0;
+  padding: 10px 32px 10px 0;
 }
-.css-hl .cl { display: flex; }
+/* 逐行可点复制：hover 高亮当前行，选中多行时点击不抢选区（见 CssCode） */
+.css-hl .cl { display: flex; cursor: pointer; border-radius: 4px; }
+.css-hl .cl:hover { background: var(--panel-2); }
+.css-hl .cl:active { background: var(--panel-3); }
 .css-hl .ln {
   flex: 0 0 32px; text-align: right; padding-right: 12px; user-select: none;
   color: var(--txt-3); opacity: 0.55;
 }
-.css-hl .ct { white-space: pre; color: var(--txt); }
+/* 面板只有 ~320px 宽，长值（filter/渐变）必须折行；overflow-wrap: anywhere 才压得住无空格的括号串 */
+.css-hl .ct { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--txt); }
 .css-hl .tv { color: #b8338f; }
 .css-hl .ts { color: #2f6fd0; }
 .css-hl .tc { color: var(--txt-3); }
