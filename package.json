@@ -17,8 +17,9 @@
     "verify:clip": "node --import ./scripts/ts-resolve.mjs scripts/verify-clipping.mjs",
     "verify": "npm run verify:psd && npm run verify:clip && npm run verify:app",
     "gen:icon": "node scripts/gen-icon.mjs && node scripts/gen-ico.mjs",
-    "dist": "electron-vite build && node scripts/dist-retry.mjs",
-    "postinstall": "patch-package"
+    "dist": "node scripts/clean-out.mjs && electron-vite build && node scripts/dist-retry.mjs",
+    "postinstall": "patch-package",
+    "dist:share": "node scripts/dist-share.mjs"
   },
   "build": {
     "appId": "com.daihongkun.qingqie",
@@ -27,7 +28,8 @@
       "output": "release"
     },
     "files": [
-      "out/**"
+      "out/**",
+      "!**/.v8-cache/**"
     ],
     "win": {
       "target": "nsis",

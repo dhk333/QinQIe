@@ -13,7 +13,6 @@ import {
   saveCustomTheme,
   type CustomTheme
 } from '@/lib/themes'
-import { RELEASES } from '@/lib/changelog'
 import { startOnboarding } from '@/lib/onboarding'
 import { FONT_SIZES, type FontSizeId } from '@/lib/uiFont'
 import { useT, getLang, setLang, LANGS } from '@/i18n/core'
@@ -68,7 +67,7 @@ const NAV: {
       { id: 'language', label: '语言', Icon: GlobeIcon, keywords: 'Language 简体 繁体 English 繁體' },
       { id: 'fontsize', label: '字体大小', Icon: FontIcon, keywords: '缩放 显示 大小' },
       { id: 'export', label: '导出设置', Icon: DownloadIcon, keywords: '格式 倍数 质量 png jpg webp 默认 命名 模板' },
-      { id: 'startup', label: '启动与更新', Icon: OpenIcon, keywords: '开机 上次 打开 恢复 检查更新 自动' }
+      { id: 'startup', label: __QQ_SHARE__ ? '启动' : '启动与更新', Icon: OpenIcon, keywords: __QQ_SHARE__ ? '开机 上次 打开 恢复' : '开机 上次 打开 恢复 检查更新 自动' }
     ]
   },
   {
@@ -82,7 +81,10 @@ const NAV: {
     group: '关于',
     items: [
       { id: 'storage', label: '存储与缓存', Icon: FolderIcon, keywords: '数据目录 容量 缩略图 清理 隐私 离线' },
-      { id: 'changelog', label: '版本记录', Icon: HistoryIcon, keywords: '更新日志 版本 发布' },
+      // 分享版不带内置更新记录（Release Notes / Changelog）
+      ...(__QQ_SHARE__
+        ? []
+        : [{ id: 'changelog' as const, label: '版本记录', Icon: HistoryIcon, keywords: '更新日志 版本 发布' }]),
       { id: 'about', label: '关于轻切', Icon: InfoIcon, keywords: '介绍 项目 版本 新手引导 教程 重放' }
     ]
   }
@@ -180,12 +182,14 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
   const [prefs, setPrefs] = useState<ExportPrefs>(() => loadExportPrefs())
   const [stats, setStats] = useState<{ root: string; total: number; thumbs: number } | null>(null)
   const [checking, setChecking] = useState(false)
+  const [ver, setVer] = useState('')
   const [closePref, setClosePref] = useState<'quit' | 'tray' | null>(null)
   const dialog = useDialog()
   const toast = useToast()
 
   useEffect(() => {
     void window.api.getClosePref().then(setClosePref)
+    void window.api.appVersion().then(setVer)
   }, [])
 
   const shown = pending ?? active
@@ -277,12 +281,12 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
         const go = await dialog({
           type: 'confirm',
           title: t('发现新版本 v{version}', { version: r.version }),
-          desc: r.notes || t('前往 GitHub 下载页获取最新版本。'),
+          desc: r.notes || t('前往下载页获取最新版本。'),
           okText: t('去下载')
         })
         if (go) window.open(r.url)
       } else if (r.status === 'latest') {
-        toast(t('已是最新版本 v{version}', { version: RELEASES[0]?.version?.replace(/^v/i, '') ?? 'dev' }))
+        toast(t('已是最新版本 v{version}', { version: ver || 'dev' }))
       } else {
         toast(t('检查更新失败，请检查网络后重试'), 'error')
       }
@@ -593,7 +597,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
         )}
         {active === 'startup' && (
           <div className="set-sec">
-            <h4>{t('启动与更新')}</h4>
+            <h4>{t(__QQ_SHARE__ ? '启动' : '启动与更新')}</h4>
             <p className="m-0 mb-[10px] text-[12px] leading-[1.6] text-txt-3">{t('开关改动立即保存，重启后保持')}</p>
             <Toggle
               name={t('启动时打开上次的 PSD')}
@@ -601,12 +605,14 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               on={ui.lastPsdOnStartup}
               onChange={(v) => setUiPrefs({ lastPsdOnStartup: v })}
             />
-            <Toggle
-              name={t('自动检查更新')}
-              desc={t('启动时静默查询一次 GitHub Releases，仅发现新版本才提示；关闭后可在「关于轻切」手动检查')}
-              on={ui.autoUpdateCheck}
-              onChange={(v) => setUiPrefs({ autoUpdateCheck: v })}
-            />
+            {!__QQ_SHARE__ && (
+              <Toggle
+                name={t('自动检查更新')}
+                desc={t('启动时静默查询一次发布页，仅发现新版本才提示；关闭后可在「关于轻切」手动检查')}
+                on={ui.autoUpdateCheck}
+                onChange={(v) => setUiPrefs({ autoUpdateCheck: v })}
+              />
+            )}
           </div>
         )}
         {active === 'canvas' && (
@@ -691,9 +697,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               <div>
                 <div className="ab-title-row">
                   <h3>{t('轻切')}</h3>
-                  <span className="ab-ver">
-                    v{RELEASES[0]?.version?.replace(/^v/i, '') ?? 'dev'}
-                  </span>
+                  <span className="ab-ver">v{ver || 'dev'}</span>
                 </div>
                 <p className="m-0 mt-[5px] text-[12px] text-txt-3">{t('本地 PSD 切图工具 · 完全离线')}</p>
               </div>
@@ -714,10 +718,12 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
               </section>
             </div>
             <div className="m-0 mt-4 flex items-center gap-[10px]">
-              <button className="btn btn-secondary" disabled={checking} onClick={() => void checkNow()}>
-                <DownloadIcon className="h-3.5 w-3.5" />
-                {checking ? t('检查中…') : t('检查更新')}
-              </button>
+              {!__QQ_SHARE__ && (
+                <button className="btn btn-secondary" disabled={checking} onClick={() => void checkNow()}>
+                  <DownloadIcon className="h-3.5 w-3.5" />
+                  {checking ? t('检查中…') : t('检查更新')}
+                </button>
+              )}
               <button className="btn btn-secondary" onClick={startOnboarding}>{t('重放新手引导')}</button>
               {closePref && (
                 <button
@@ -737,7 +743,7 @@ export default function SettingsPage({ theme, onThemeChange, fontSize, onFontSiz
             </p>
           </div>
         )}
-        {active === 'changelog' && <ChangelogPage />}
+        {!__QQ_SHARE__ && active === 'changelog' && <ChangelogPage />}
         {active === 'shortcuts' && (
           <div className="set-sec set-sec-wide">
             <h4>{t('快捷键')}</h4>

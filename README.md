@@ -56,6 +56,8 @@
 - 内置「更新日志」页与仓库根目录 `更新记录.md` 同一份口径
 - 设置页可手动检查更新，明确反馈已是最新 / 发现新版本 / 网络异常
 
+以上三项只在自用版（`npm run dist`）里；分享版（`npm run dist:share`）不含更新检查与更新记录，见「打包发布」。
+
 ---
 
 ## 技术栈
@@ -108,11 +110,25 @@ npm run verify     # 像素保真度回归 + 应用数据通路回归
 
 ### 3. 打包发布（Windows）
 
+一份代码出两种包，靠 `QQ_SHARE` 环境变量（编译期常量 `__QQ_SHARE__`）做开关：
+
 ```bash
-npm run dist       # = electron-vite build && electron-builder --win
+npm run dist        # 自用版 → release/
+QQ_SHARE=1 由 npm run dist:share 设置，自用版不带这个变量
+npm run dist:share  # 分享版 → release-share/
 ```
 
-产物在 `release/轻切 Setup <版本>.exe`（NSIS 安装向导，支持自选安装路径）。发布前门禁：
+| | 自用版 `npm run dist` | 分享版 `npm run dist:share` |
+| --- | --- | --- |
+| 产物目录 | `release/` | `release-share/` |
+| appId / 发布者 | `com.daihongkun.qingqie` / `daihongkun` | `com.qingqie.app` / `qingqie` |
+| 自动检查更新（`api.github.com` + 仓库名） | 有 | 整段不进包 |
+| 顶栏新版胶囊、设置页「版本记录」「检查更新」 | 有 | 不渲染，`ChangelogPage` 被 tree-shake |
+| `resources/app-update.yml`（含 owner/repo） | 有 | 不生成（`publish: null`） |
+
+分享版打包前后会各扫一遍产物：`dhk333` / `QinQIe` / `daihongkun` / `api.github.com` / `GitHub` / 更新记录正文标题，任一命中就直接失败退出，不会产出一个"看着干净"的包。所以开关改动之后要外发，一律走 `npm run dist:share`，不要手抄自用版的包。
+
+产物均为 `轻切 Setup <版本>.exe`（NSIS 安装向导，支持自选安装路径）。发布前门禁：
 
 1. `npm run typecheck && npm run build && npm run verify` 全绿；
 2. 用真实 PSD 回归一遍：导入 → 渲染 → 点选 → 测距 → 切片 → 批量导出 → 复制 CSS。

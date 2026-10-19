@@ -1,6 +1,8 @@
 node_modules
 out
 release
+release-share
+release-share-*
 dist
 *.local
 .DS_Store

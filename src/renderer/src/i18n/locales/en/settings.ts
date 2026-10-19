@@ -81,7 +81,7 @@ export default {
   '检查更新': 'Check for updates',
   '检查中…': 'Checking…',
   '发现新版本 v{version}': 'New version v{version} found',
-  '前往 GitHub 下载页获取最新版本。': 'Get the latest version from the GitHub releases page.',
+  '前往下载页获取最新版本。': 'Get the latest version from the download page.',
   '去下载': 'Download',
   '已是最新版本 v{version}': 'You’re on the latest version v{version}',
   '检查更新失败，请检查网络后重试': 'Update check failed — check your network and retry',
@@ -103,8 +103,8 @@ export default {
   '直接进入最后编辑的设计稿；关闭后启动停在项目页':
     'Jump straight into the design file you were editing; when off, startup stays on the project page',
   '自动检查更新': 'Check for updates automatically',
-  '启动时静默查询一次 GitHub Releases，仅发现新版本才提示；关闭后可在「关于轻切」手动检查':
-    'Query GitHub Releases once at startup and notify only when a newer version exists; you can still check manually in “About 轻切”',
+  '启动时静默查询一次发布页，仅发现新版本才提示；关闭后可在「关于轻切」手动检查':
+    'Query the release page once at startup and notify only when a newer version exists; you can still check manually in “About 轻切”',
   // 画布与测量
   '画布与测量': 'Canvas & Measuring',
   '详情页画布的行为，改动立即生效': 'Behaviour of the detail-page canvas; changes apply immediately',

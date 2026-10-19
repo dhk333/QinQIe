@@ -468,47 +468,53 @@ async function prunePsdCache(dir: string): Promise<void> {
   }
 }
 
+// ========== 应用版本（关于页读数，不联网） ==========
+ipcMain.handle('app:version', () => app.getVersion())
+
 // ========== 更新检查（GitHub Releases，无后端；失败一律静默） ==========
-function cmpVer(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] || 0) - (pb[i] || 0)
-    if (d) return d
-  }
-  return 0
-}
-
-const REPO = 'dhk333/QinQIe'
-
-ipcMain.handle(
-  'app:check-update',
-  async (): Promise<
-    | { status: 'new'; version: string; url: string; notes: string }
-    | { status: 'latest' }
-    | { status: 'error' }
-  > => {
-    try {
-      const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-        signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': 'qingqie-desktop' }
-      })
-      if (!res.ok) return { status: 'error' }
-      const rel = (await res.json()) as { tag_name?: string; html_url?: string; body?: string }
-      const version = (rel.tag_name || '').replace(/^v/i, '')
-      if (!/^\d+(\.\d+)*$/.test(version)) return { status: 'error' }
-      if (cmpVer(version, app.getVersion()) <= 0) return { status: 'latest' }
-      return {
-        status: 'new',
-        version,
-        url: rel.html_url || `https://github.com/${REPO}/releases`,
-        notes: rel.body || ''
-      }
-    } catch {
-      return { status: 'error' }
+// 分享版（QQ_SHARE=1）不带这段：仓库名与 api.github.com 请求都不会出现在包里
+if (!__QQ_SHARE__) {
+  const cmpVer = (a: string, b: string): number => {
+    const pa = a.split('.').map(Number)
+    const pb = b.split('.').map(Number)
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0)
+      if (d) return d
     }
+    return 0
   }
-)
+
+  const REPO = 'dhk333/QinQIe'
+
+  ipcMain.handle(
+    'app:check-update',
+    async (): Promise<
+      | { status: 'new'; version: string; url: string; notes: string }
+      | { status: 'latest' }
+      | { status: 'error' }
+    > => {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+          signal: AbortSignal.timeout(8000),
+          headers: { 'User-Agent': 'qingqie-desktop' }
+        })
+        if (!res.ok) return { status: 'error' }
+        const rel = (await res.json()) as { tag_name?: string; html_url?: string; body?: string }
+        const version = (rel.tag_name || '').replace(/^v/i, '')
+        if (!/^\d+(\.\d+)*$/.test(version)) return { status: 'error' }
+        if (cmpVer(version, app.getVersion()) <= 0) return { status: 'latest' }
+        return {
+          status: 'new',
+          version,
+          url: rel.html_url || `https://github.com/${REPO}/releases`,
+          notes: rel.body || ''
+        }
+      } catch {
+        return { status: 'error' }
+      }
+    }
+  )
+}
 
 // ========== PSD 文件 ==========
 const PSD_FILTERS = [{ name: 'Photoshop 文件', extensions: ['psd'] }]

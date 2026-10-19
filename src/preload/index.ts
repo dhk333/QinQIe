@@ -57,6 +57,8 @@ const api = {
     p: string,
     payload: { entry: unknown; preview?: { bytes: Uint8Array; ext: string } }
   ): Promise<boolean> => ipcRenderer.invoke('psd-cache:write', p, payload),
+  // 应用版本号（关于页用；不依赖内置更新记录，分享版也有）
+  appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   // 更新检查
   checkUpdate: (): Promise<
     | { status: 'new'; version: string; url: string; notes: string }

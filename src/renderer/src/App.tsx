@@ -37,7 +37,7 @@ export default function App() {
   const startupDone = useRef(false)
 
   useEffect(() => {
-    if (!getUiPrefs().autoUpdateCheck) return
+    if (__QQ_SHARE__ || !getUiPrefs().autoUpdateCheck) return
     let alive = true
     window.api.checkUpdate().then((u) => {
       if (!alive) return
@@ -168,7 +168,7 @@ export default function App() {
             <AppLogo size={25} />
           </div>
           <span className="name">轻切</span>
-          {update && (
+          {!__QQ_SHARE__ && update && (
             <span
               className="upd-pill"
               title={t('点击查看 Release 并下载新版本')}
@@ -340,7 +340,7 @@ export default function App() {
               onBack={() => navigate(`#/project/${currentProject.id}`)}
             />
           )}
-          {route.name === 'changelog' && <ChangelogPage />}
+          {!__QQ_SHARE__ && route.name === 'changelog' && <ChangelogPage />}
           {route.name === 'settings' && (
             <SettingsPage
               theme={theme}
